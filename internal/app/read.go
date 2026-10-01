@@ -1,0 +1,175 @@
+package app
+
+import (
+	"os"
+	"os/exec"
+	"path/filepath"
+	"sort"
+	"strconv"
+	"strings"
+
+	"github.com/aclemen1/dossier-cli/internal/connector"
+	"github.com/aclemen1/dossier-cli/internal/dossier"
+	"github.com/aclemen1/dossier-cli/internal/spec"
+)
+
+// LoadDir loads the dossier whose directory is dir or contains it.
+func (a *App) LoadDir(dir string) (*dossier.Dossier, error) {
+	if real, err := filepath.EvalSymlinks(dir); err == nil {
+		dir = real
+	}
+	for d := dir; d != "" && d != a.S.Root && d != filepath.Dir(d); d = filepath.Dir(d) {
+		if filepath.Dir(d) == a.S.Root {
+			return dossier.Load(d)
+		}
+	}
+	return nil, spec.NotFound("%s is not inside a dossier of %s", dir, a.S.Root)
+}
+
+type Row struct {
+	ID        string   `json:"id"`
+	Title     string   `json:"title"`
+	State     string   `json:"state"`
+	Activity  string   `json:"activity"`
+	WaitingOn string   `json:"waiting_on,omitempty"`
+	Parent    string   `json:"parent,omitempty"`
+	Updated   string   `json:"updated"`
+	Pending   int      `json:"pending_transitions,omitempty"`
+	BlockedBy []string `json:"blocked_by,omitempty"`
+}
+
+func (a *App) List(status, parent string) ([]Row, error) {
+	all, err := a.All()
+	if err != nil {
+		return nil, err
+	}
+	if parent != "" {
+		p, err := a.Load(parent)
+		if err != nil {
+			return nil, err
+		}
+		parent = p.ID
+	}
+	panesNow := Panes()
+	idx := map[string]*dossier.Dossier{}
+	for _, d := range all {
+		idx[d.ID] = d
+	}
+	rows := []Row{}
+	for _, d := range all {
+		switch status {
+		case "active":
+			if d.State != dossier.Open && d.State != dossier.Waiting {
+				continue
+			}
+		case "all":
+		default:
+			if d.State != status {
+				continue
+			}
+		}
+		if parent != "" && d.Parent != parent {
+			continue
+		}
+		rows = append(rows, Row{ID: d.ID, Title: d.Title, State: d.State, Activity: Activity(d, panesNow),
+			WaitingOn: d.WaitingOn, Parent: d.Parent, Updated: d.Updated, Pending: len(d.Run.PendingTransitions), BlockedBy: BlockedBy(d, idx)})
+	}
+	sort.Slice(rows, func(i, j int) bool { return rows[i].ID < rows[j].ID })
+	return rows, nil
+}
+
+type ShowResult struct {
+	*dossier.Dossier
+	Activity string   `json:"activity"`
+	Session  string   `json:"session,omitempty"`
+	TabID    string   `json:"tab_id,omitempty"`
+	Files    []string `json:"files"`
+	Children []string `json:"children,omitempty"`
+	Outgoing []Edge   `json:"outgoing"`
+	Incoming []Edge   `json:"incoming"`
+	Log      string   `json:"log"`
+}
+
+func (a *App) Show(d *dossier.Dossier) ShowResult {
+	r := ShowResult{Dossier: d, Activity: Activity(d, Panes()), Session: d.Run.Session, TabID: d.Run.TabID, Files: []string{}}
+	for _, sub := range []string{"context", "files"} {
+		entries, _ := os.ReadDir(d.Path(sub))
+		for _, e := range entries {
+			r.Files = append(r.Files, filepath.Join(sub, e.Name()))
+		}
+	}
+	all, _ := a.All()
+	for _, x := range all {
+		if x.Parent == d.ID {
+			r.Children = append(r.Children, x.ID)
+		}
+	}
+	r.Outgoing, r.Incoming = a.Outgoing(d), a.Incoming(d)
+	if b, err := os.ReadFile(d.Path("log.md")); err == nil {
+		r.Log = string(b)
+	}
+	return r
+}
+
+type Check struct {
+	Name   string `json:"name"`
+	OK     bool   `json:"ok"`
+	Detail string `json:"detail"`
+}
+
+type DoctorReport struct {
+	Store  string  `json:"store"`
+	Checks []Check `json:"checks"`
+}
+
+func (r DoctorReport) failed() int {
+	n := 0
+	for _, c := range r.Checks {
+		if !c.OK {
+			n++
+		}
+	}
+	return n
+}
+
+// PendingTransitions lets a failing doctor exit with code 4.
+func (r DoctorReport) PendingTransitions() int { return r.failed() }
+
+func (a *App) Doctor() DoctorReport {
+	rep := DoctorReport{Store: a.S.Root}
+	add := func(name string, ok bool, detail string) { rep.Checks = append(rep.Checks, Check{name, ok, detail}) }
+
+	cmd := a.S.Config.ACP.Command
+	if len(cmd) == 0 {
+		add("acp command", false, "[acp] command is empty")
+	} else if p, err := exec.LookPath(cmd[0]); err != nil {
+		add("acp command", false, cmd[0]+" not found in PATH")
+	} else {
+		add("acp command", true, p)
+	}
+	if out, err := exec.Command("herdr", "status").CombinedOutput(); err != nil {
+		add("herdr", false, strings.TrimSpace(string(out)))
+	} else {
+		add("herdr", true, "server reachable")
+	}
+	for _, src := range a.S.Config.Sources {
+		d, err := (connector.Runner{Store: a.S, Source: src}).Describe()
+		switch {
+		case err != nil:
+			add("source "+src.Name, false, err.Error())
+		case d.Protocol != connector.Protocol:
+			add("source "+src.Name, false, "speaks protocol "+itoa(d.Protocol)+", dossier expects "+itoa(connector.Protocol))
+		default:
+			add("source "+src.Name, true, strings.Join(d.Verbs, ", "))
+		}
+	}
+	all, _ := a.All()
+	pending := 0
+	for _, d := range all {
+		pending += len(d.Run.PendingTransitions)
+	}
+	add("pending transitions", pending == 0, itoa(pending)+" pending; replay with `dossier retry`")
+	return rep
+}
+
+func itoa(n int) string { return strconv.Itoa(n) }

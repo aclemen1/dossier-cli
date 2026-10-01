@@ -1,0 +1,245 @@
+package store
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strconv"
+	"strings"
+	"syscall"
+
+	"github.com/BurntSushi/toml"
+
+	"github.com/aclemen1/dossier-cli/internal/spec"
+)
+
+const metaDir = ".dossier"
+
+type Store struct {
+	Root   string
+	Config Config
+	lock   *os.File
+}
+
+func (s *Store) Meta(parts ...string) string {
+	return filepath.Join(append([]string{s.Root, metaDir}, parts...)...)
+}
+
+type userConfig struct {
+	DefaultStore string `toml:"default_store"`
+}
+
+func userConfigPath() string {
+	dir := ExpandHome("~/.config")
+	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
+		dir = xdg
+	}
+	return filepath.Join(dir, "dossier", "config.toml")
+}
+
+// Resolve finds the store: --store, then DOSSIER_STORE, then the store that
+// contains the working directory, then default_store.
+func Resolve(flag string) (*Store, error) {
+	candidates := []string{flag, os.Getenv("DOSSIER_STORE")}
+	for _, c := range candidates {
+		if c != "" {
+			return Open(ExpandHome(c))
+		}
+	}
+	if wd, err := os.Getwd(); err == nil {
+		for d := wd; ; d = filepath.Dir(d) {
+			if fi, err := os.Stat(filepath.Join(d, metaDir, "config.toml")); err == nil && !fi.IsDir() {
+				return Open(d)
+			}
+			if filepath.Dir(d) == d {
+				break
+			}
+		}
+	}
+	var uc userConfig
+	if _, err := toml.DecodeFile(userConfigPath(), &uc); err == nil && uc.DefaultStore != "" {
+		return Open(ExpandHome(uc.DefaultStore))
+	}
+	return nil, spec.NotFound("no dossier store found. Create one with `dossier init ~/dossiers/perso --sphere perso --default`, or pass --store <path>")
+}
+
+func Open(root string) (*Store, error) {
+	root, _ = filepath.Abs(root)
+	if real, err := filepath.EvalSymlinks(root); err == nil {
+		root = real
+	}
+	cfgPath := filepath.Join(root, metaDir, "config.toml")
+	if _, err := os.Stat(cfgPath); err != nil {
+		return nil, spec.NotFound("%s is not a dossier store (no %s/config.toml). Create it with `dossier init %s --sphere <name>`", root, metaDir, root)
+	}
+	cfg, err := loadConfig(cfgPath)
+	if err != nil {
+		return nil, spec.UserError("cannot read %s: %v", cfgPath, err)
+	}
+	return &Store{Root: root, Config: cfg}, nil
+}
+
+func Init(root, sphere string, makeDefault bool) (*Store, error) {
+	root, _ = filepath.Abs(ExpandHome(root))
+	if _, err := os.Stat(filepath.Join(root, metaDir)); err == nil {
+		return nil, spec.UserError("%s already holds a dossier store (%s/ exists)", root, metaDir)
+	}
+	sub := func(t string) string { return strings.ReplaceAll(t, "{{sphere}}", sphere) }
+	files := map[string]string{
+		filepath.Join(metaDir, "config.toml"):         sub(configTemplate),
+		filepath.Join(metaDir, "prompts", "open.md"):  openPromptTemplate,
+		filepath.Join(metaDir, "prompts", "event.md"): eventPromptTemplate,
+		"index.md":   sub(indexTemplate),
+		"CLAUDE.md":  sub(charterTemplate),
+		".gitignore": gitignoreTemplate,
+	}
+	for rel, content := range files {
+		p := filepath.Join(root, rel)
+		if _, err := os.Stat(p); err == nil {
+			continue
+		}
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			return nil, err
+		}
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			return nil, err
+		}
+	}
+	if makeDefault {
+		p := userConfigPath()
+		_ = os.MkdirAll(filepath.Dir(p), 0o755)
+		if err := os.WriteFile(p, []byte(fmt.Sprintf("default_store = %q\n", root)), 0o644); err != nil {
+			return nil, err
+		}
+	}
+	return Open(root)
+}
+
+// Lock takes the store-wide lock for mutating operations.
+func (s *Store) Lock() error {
+	f, err := os.OpenFile(s.Meta("lock"), os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		return err
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		f.Close()
+		return spec.Locked("the store %s is busy with another dossier command; retry in a moment", s.Root)
+	}
+	s.lock = f
+	return nil
+}
+
+func (s *Store) Unlock() {
+	if s.lock != nil {
+		_ = syscall.Flock(int(s.lock.Fd()), syscall.LOCK_UN)
+		s.lock.Close()
+		s.lock = nil
+	}
+}
+
+var dirRe = regexp.MustCompile(`^(\d{4,})-`)
+
+// Dirs lists dossier directories, oldest first.
+func (s *Store) Dirs() ([]string, error) {
+	entries, err := os.ReadDir(s.Root)
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, e := range entries {
+		if e.IsDir() && dirRe.MatchString(e.Name()) {
+			out = append(out, filepath.Join(s.Root, e.Name()))
+		}
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+// NewDir allocates the next number and creates its directory atomically.
+func (s *Store) NewDir(slug string) (num int, dir string, err error) {
+	dirs, err := s.Dirs()
+	if err != nil {
+		return 0, "", err
+	}
+	next := 1
+	for _, d := range dirs {
+		if m := dirRe.FindStringSubmatch(filepath.Base(d)); m != nil {
+			if n, _ := strconv.Atoi(m[1]); n >= next {
+				next = n + 1
+			}
+		}
+	}
+	for tries := 0; tries < 100; tries++ {
+		dir = filepath.Join(s.Root, fmt.Sprintf("%04d-%s", next, slug))
+		if err = os.Mkdir(dir, 0o755); err == nil {
+			return next, dir, nil
+		}
+		if !errors.Is(err, os.ErrExist) {
+			return 0, "", err
+		}
+		next++
+	}
+	return 0, "", err
+}
+
+var idRe = regexp.MustCompile(`(?i)^(?:d-?)?0*(\d+)(?:-.*)?$`)
+
+// FindDir resolves 42, D-42, D-0042 or 0042-slug to a directory.
+func (s *Store) FindDir(id string) (string, error) {
+	m := idRe.FindStringSubmatch(strings.TrimSpace(id))
+	if m == nil {
+		return "", spec.UserError("%q is not a dossier id. Use D-0042, 42 or 0042-slug, for example `dossier show D-0042`", id)
+	}
+	want, _ := strconv.Atoi(m[1])
+	dirs, err := s.Dirs()
+	if err != nil {
+		return "", err
+	}
+	for _, d := range dirs {
+		if n, _ := strconv.Atoi(dirRe.FindStringSubmatch(filepath.Base(d))[1]); n == want {
+			return d, nil
+		}
+	}
+	return "", spec.NotFound("no dossier D-%04d in %s. List them with `dossier ls --status all`", want, s.Root)
+}
+
+func FormatID(n int) string { return fmt.Sprintf("D-%04d", n) }
+
+func NumberOf(dir string) int {
+	if m := dirRe.FindStringSubmatch(filepath.Base(dir)); m != nil {
+		n, _ := strconv.Atoi(m[1])
+		return n
+	}
+	return 0
+}
+
+// ResolvePath resolves a path from the config relative to the store root.
+func (s *Store) ResolvePath(p string) string {
+	p = ExpandHome(p)
+	if filepath.IsAbs(p) {
+		return p
+	}
+	return filepath.Join(s.Root, p)
+}
+
+func (s *Store) PromptTemplate(name string) (string, error) {
+	rel := s.Config.Prompt.Open
+	if name == "event" {
+		rel = s.Config.Prompt.Event
+	}
+	if rel == "" {
+		rel = filepath.Join("prompts", name+".md")
+	}
+	p := rel
+	if !filepath.IsAbs(p) {
+		p = s.Meta(rel)
+	}
+	b, err := os.ReadFile(p)
+	if err != nil {
+		return "", spec.UserError("cannot read prompt template %s: %v", p, err)
+	}
+	return string(b), nil
+}
