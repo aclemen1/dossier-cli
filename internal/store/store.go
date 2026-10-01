@@ -185,15 +185,31 @@ func (s *Store) NewDir(slug string) (num int, dir string, err error) {
 	return 0, "", err
 }
 
-var idRe = regexp.MustCompile(`(?i)^(?:d-?)?0*(\d+)(?:-.*)?$`)
+var idRe = regexp.MustCompile(`(?i)^(?:([a-z]{1,4})-?)?0*(\d+)(?:-.*)?$`)
 
-// FindDir resolves 42, D-42, D-0042 or 0042-slug to a directory.
+// Prefix is the store's id prefix: P for P-0042. D when the config sets none.
+func (s *Store) Prefix() string {
+	if p := strings.TrimSpace(s.Config.Store.IDPrefix); p != "" {
+		return strings.ToUpper(p)
+	}
+	return "D"
+}
+
+// FormatID renders a dossier number with the store's prefix.
+func (s *Store) FormatID(n int) string { return fmt.Sprintf("%s-%04d", s.Prefix(), n) }
+
+// FindDir resolves 42, P-42, P-0042 or 0042-slug to a directory. An id with
+// another store's prefix is refused: the spheres stay apart.
 func (s *Store) FindDir(id string) (string, error) {
 	m := idRe.FindStringSubmatch(strings.TrimSpace(id))
+	ex := s.FormatID(42)
 	if m == nil {
-		return "", spec.UserError("%q is not a dossier id. Use D-0042, 42 or 0042-slug, for example `dossier show D-0042`", id)
+		return "", spec.UserError("%q is not a dossier id. Use %s, 42 or 0042-slug, for example `dossier show %s`", id, ex, ex)
 	}
-	want, _ := strconv.Atoi(m[1])
+	if m[1] != "" && !strings.EqualFold(m[1], s.Prefix()) {
+		return "", spec.UserError("%s belongs to another store: this store (%s) numbers its dossiers %s-…. Pass --store for the other one", strings.TrimSpace(id), s.Root, s.Prefix())
+	}
+	want, _ := strconv.Atoi(m[2])
 	dirs, err := s.Dirs()
 	if err != nil {
 		return "", err
@@ -203,10 +219,8 @@ func (s *Store) FindDir(id string) (string, error) {
 			return d, nil
 		}
 	}
-	return "", spec.NotFound("no dossier D-%04d in %s. List them with `dossier ls --status all`", want, s.Root)
+	return "", spec.NotFound("no dossier %s in %s. List them with `dossier ls --status all`", s.FormatID(want), s.Root)
 }
-
-func FormatID(n int) string { return fmt.Sprintf("D-%04d", n) }
 
 func NumberOf(dir string) int {
 	if m := dirRe.FindStringSubmatch(filepath.Base(dir)); m != nil {

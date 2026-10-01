@@ -122,10 +122,24 @@ func init() {
 		Text: spec.TextSchema,
 	})
 	spec.Register(&spec.Action{
-		Category: "meta", Name: "skill", Summary: "Print the embedded agent skill.", Meta: true,
-		Params:   []spec.Param{{Name: "verb", Kind: spec.String, Positional: true, Default: "show", Enum: []string{"show"}, Help: "show"}},
-		Examples: []string{"dossier skill show"},
-		Run:      func(*spec.Context) (any, error) { return strings.TrimSpace(skillText), nil },
+		Category: "meta", Name: "skill", Summary: "Print the embedded agent skill, or install it for an agent harness.", Meta: true,
+		Params: []spec.Param{
+			{Name: "verb", Kind: spec.String, Positional: true, Default: "show", Enum: []string{"show", "install"}, Help: "show or install"},
+			{Name: "for", Kind: spec.String, Default: "claude", Help: "Harness to install for: claude."},
+			{Name: "dir", Kind: spec.String, Help: "Install into this directory instead."},
+		},
+		Effects:  []string{"install: writes SKILL.md into ~/.claude/skills/dossier/ (or --dir)."},
+		Examples: []string{"dossier skill show", "dossier skill install --for claude"},
+		Run: func(ctx *spec.Context) (any, error) {
+			if ctx.Str("verb") == "install" {
+				p, err := installSkill(ctx.Str("for"), store.ExpandHome(ctx.Str("dir")))
+				if err != nil {
+					return nil, err
+				}
+				return "installed " + p, nil
+			}
+			return strings.TrimSpace(skillText), nil
+		},
 	})
 
 	// ---------------------------------------------------------------- store

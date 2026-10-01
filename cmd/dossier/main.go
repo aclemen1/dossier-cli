@@ -71,6 +71,13 @@ func run(argv []string) int {
 		return spec.Emit(act, format, nil, err)
 	}
 	result, err := act.Run(&spec.Context{Args: args, Store: storeFlag, Format: format, Stdin: os.Stdin})
+	if act.Name == "mcp" {
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "dossier mcp:", err)
+			return 1
+		}
+		return 0
+	}
 	if act.Name == "hook" {
 		// A hook never fails the agent that runs it.
 		return 0

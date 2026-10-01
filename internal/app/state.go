@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/aclemen1/dossier-cli/internal/connector"
 	"github.com/aclemen1/dossier-cli/internal/dossier"
@@ -66,9 +67,17 @@ func (a *App) SetState(d *dossier.Dossier, move, note, waitingOn string) (int, e
 	if m.to == dossier.Done {
 		a.notifyDependents(d)
 	}
+	if err := d.Save(); err != nil {
+		return pending, err
+	}
 	if a.S.Config.ClosesTabOn(m.to) {
 		_ = a.Archive(d)
-		if err := a.closeSession(d); err != nil {
+		if os.Getenv("DOSSIER_ID") == d.ID {
+			// The session closes its own dossier: let it finish its turn first.
+			if err := a.closeTabLater(d, 8*time.Second); err != nil {
+				_ = d.Log("tab not closed: %v", err)
+			}
+		} else if err := a.closeSession(d); err != nil {
 			_ = d.Log("tab not closed: %v", err)
 		}
 	}

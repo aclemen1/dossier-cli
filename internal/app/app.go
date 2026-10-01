@@ -11,6 +11,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/aclemen1/dossier-cli/internal/acp"
 	"github.com/aclemen1/dossier-cli/internal/connector"
@@ -122,7 +124,8 @@ var addressRe = regexp.MustCompile(`^\s*(\d+)\s*[:,.\-–]?\s*`)
 // route returns the dossier an instruction addresses ("D-42: …"), if any.
 func (a *App) route(instruction string) (*dossier.Dossier, string) {
 	low := strings.ToLower(instruction)
-	for _, prefix := range a.S.Config.Routing.AddressPrefix {
+	prefixes := append([]string{a.S.Prefix() + "-"}, a.S.Config.Routing.AddressPrefix...)
+	for _, prefix := range prefixes {
 		p := strings.ToLower(prefix)
 		if !strings.HasPrefix(strings.TrimSpace(low), p) {
 			continue
@@ -183,7 +186,7 @@ func (a *App) Open(p OpenParams) (OpenResult, error) {
 	if err != nil {
 		return OpenResult{}, err
 	}
-	id := store.FormatID(num)
+	id := a.S.FormatID(num)
 	d := dossier.Create(dir, id, p.Title)
 	instruction := strings.TrimSpace(p.Instruction)
 	if instruction == "" {
@@ -345,8 +348,8 @@ func (a *App) renderPrompt(d *dossier.Dossier, kind, instruction string, summary
 		fileList = strings.Join(files, ", ")
 	}
 	sum := summaryLine(summary)
-	if kind == "open" && sum != "" {
-		sum = "Source: " + sum + "\n"
+	if sum == "" {
+		sum = "—"
 	}
 	r := strings.NewReplacer(
 		"{{id}}", d.ID, "{{title}}", d.Title, "{{instruction}}", instruction,
@@ -400,7 +403,19 @@ func (a *App) client(d *dossier.Dossier) (*acp.Client, error) {
 			cmd[i] = store.ExpandHome(cmd[i])
 		}
 	}
-	return acp.Start(acp.Options{Command: cmd, AgentArgs: args, Env: env, Meta: cfg.ACP.Meta, Cwd: d.Dir})
+	exe, err := os.Executable()
+	if err != nil {
+		return nil, err
+	}
+	exe, _ = filepath.EvalSymlinks(exe)
+	mcp := []acp.MCPServer{{Name: "dossier", Command: exe, Args: []string{"mcp"},
+		Env: []acp.EnvEntry{{Name: "DOSSIER_ID", Value: d.ID}, {Name: "DOSSIER_STORE", Value: a.S.Root}}}}
+	meta := map[string]any{}
+	for k, v := range cfg.ACP.Meta {
+		meta[k] = v
+	}
+	meta["tabLabel"] = TabLabel(d)
+	return acp.Start(acp.Options{Command: cmd, AgentArgs: args, Env: env, Meta: meta, Cwd: d.Dir, MCP: mcp})
 }
 
 func (a *App) sendPrompt(d *dossier.Dossier, text string) error {
@@ -426,6 +441,7 @@ func (a *App) sendPrompt(d *dossier.Dossier, text string) error {
 	if err := d.Save(); err != nil {
 		return err
 	}
+	renameTab(d.Run.TabID, TabLabel(d))
 	if err := c.Prompt(d.Run.Session, text); err != nil {
 		return err
 	}
@@ -457,6 +473,7 @@ func (a *App) Attach(d *dossier.Dossier) error {
 		if err := d.Save(); err != nil {
 			return err
 		}
+		renameTab(d.Run.TabID, TabLabel(d))
 	}
 	if d.Run.TabID != "" {
 		_ = exec.Command("herdr", "tab", "focus", d.Run.TabID).Run()
@@ -488,6 +505,35 @@ func (a *App) Prompt(d *dossier.Dossier, text string) error {
 	return a.sendPrompt(d, text)
 }
 
+// closeTabLater starts a detached `dossier internal-closetab` that waits, then
+// closes the session's tab.
+func (a *App) closeTabLater(d *dossier.Dossier, delay time.Duration) error {
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	cmd := exec.Command(exe, "closetab", d.ID, "--store", a.S.Root, "--delay", delay.String())
+	cmd.Env = os.Environ()
+	for i, kv := range cmd.Env {
+		if strings.HasPrefix(kv, "DOSSIER_ID=") {
+			cmd.Env[i] = "DOSSIER_ID="
+		}
+	}
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	return cmd.Process.Release()
+}
+
+// CloseTab closes the dossier's tab, keeping the session resumable.
+func (a *App) CloseTab(d *dossier.Dossier) error {
+	if err := a.closeSession(d); err != nil {
+		return err
+	}
+	return d.Save()
+}
+
 func (a *App) closeSession(d *dossier.Dossier) error {
 	if d.Run.Session == "" || !paneAlive(d.Run.PaneID) {
 		return nil
@@ -510,6 +556,24 @@ func (a *App) closeSession(d *dossier.Dossier) error {
 type paneInfo struct {
 	PaneID      string `json:"pane_id"`
 	AgentStatus string `json:"agent_status"`
+}
+
+const tabTitleLength = 30
+
+// TabLabel names a dossier's tab: its id and the start of its title.
+func TabLabel(d *dossier.Dossier) string {
+	t := []rune(strings.TrimSpace(d.Title))
+	if len(t) > tabTitleLength {
+		t = append([]rune(strings.TrimSpace(string(t[:tabTitleLength-1]))), '…')
+	}
+	return d.ID + " · " + string(t)
+}
+
+// renameTab labels a herdr tab. Tests replace it.
+var renameTab = func(tabID, label string) {
+	if tabID != "" {
+		_ = exec.Command("herdr", "tab", "rename", tabID, label).Run()
+	}
 }
 
 // panes lists herdr panes and their agent status. Tests replace it.
@@ -549,8 +613,12 @@ func Activity(d *dossier.Dossier, all map[string]string) string {
 	if !ok {
 		return "stopped"
 	}
-	if st == "" || st == "unknown" {
+	switch st {
+	case "", "unknown":
 		return "idle"
+	case "done":
+		// herdr: the turn ended and the agent waits for the user.
+		return "ready"
 	}
 	return st
 }

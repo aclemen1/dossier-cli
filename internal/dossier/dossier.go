@@ -134,7 +134,7 @@ func Load(dir string) (*Dossier, error) {
 		doc: mapping, body: body,
 	}
 	if d.ID == "" {
-		d.ID = store.FormatID(store.NumberOf(dir))
+		d.ID = fmt.Sprintf("D-%04d", store.NumberOf(dir))
 	}
 	if b, err := os.ReadFile(filepath.Join(dir, ".state.json")); err == nil {
 		_ = json.Unmarshal(b, &d.Run)

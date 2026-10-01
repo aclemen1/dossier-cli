@@ -137,18 +137,19 @@ func (a *App) agentSettings() (string, error) {
 		}}}},
 	}
 	settings := map[string]any{"hooks": hooks}
+	// The agent acts on dossiers through its scoped MCP tools, not the CLI.
+	deny := []string{"Bash(dossier:*)", "Bash(" + exe + ":*)"}
 	if prot := a.protected(); len(prot) > 0 {
 		hooks["PreToolUse"] = []any{map[string]any{"matcher": "Bash", "hooks": []any{map[string]any{
 			"type": "command", "command": q + " hook guard", "timeout": 10,
 		}}}}
-		var deny []string
 		for _, p := range prot {
 			for _, tool := range []string{"Edit", "Write", "NotebookEdit"} {
 				deny = append(deny, tool+"(/"+p+"/**)")
 			}
 		}
-		settings["permissions"] = map[string]any{"deny": deny}
 	}
+	settings["permissions"] = map[string]any{"allow": []string{"mcp__dossier"}, "deny": deny}
 	p := a.S.Meta("run", "agent-settings.json")
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		return "", err

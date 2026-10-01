@@ -20,7 +20,8 @@ type Config struct {
 }
 
 type StoreSection struct {
-	Sphere string `toml:"sphere"`
+	Sphere   string `toml:"sphere"`
+	IDPrefix string `toml:"id_prefix"`
 }
 
 type ACPSection struct {

@@ -15,6 +15,7 @@ import (
 func TestMain(m *testing.M) {
 	testutil.Dispatch()
 	panes = func() map[string]string { return map[string]string{} }
+	renameTab = func(string, string) {}
 	os.Exit(m.Run())
 }
 
