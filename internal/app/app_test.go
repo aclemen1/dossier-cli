@@ -486,3 +486,12 @@ func TestDossierIDFromEnvironment(t *testing.T) {
 		t.Fatalf("got %v %v", d, err)
 	}
 }
+
+func TestShowReturnsTheBody(t *testing.T) {
+	f := newFixture(t)
+	f.a.Open(OpenParams{Title: "Séance", Instruction: "Tenir l'ordre du jour", NoStart: true})
+	d, _ := f.a.Load("1")
+	if body := f.a.Show(d).Body; !strings.Contains(body, "Tenir l'ordre du jour") {
+		t.Fatalf("body %q", body)
+	}
+}

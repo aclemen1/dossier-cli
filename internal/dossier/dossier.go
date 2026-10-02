@@ -169,6 +169,10 @@ func splitFrontmatter(s string) (fm, body string, err error) {
 	return fm, rest, nil
 }
 
+// Body is the Markdown body of dossier.md: the instruction and every section a
+// person or an agent added, the managed links block included.
+func (d *Dossier) Body() string { return d.body }
+
 // SetBody replaces the Markdown body. Only used at creation.
 func (d *Dossier) SetBody(b string) { d.body = b }
 

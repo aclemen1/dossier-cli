@@ -23,7 +23,7 @@ type tool struct {
 }
 
 var tools = []tool{
-	{name: "show", action: "show", self: []string{"id"}, description: "Show this dossier: state, sources, files, links, history."},
+	{name: "show", action: "show", self: []string{"id"}, description: "Show this dossier: state, sources, files, links, history, and the body of its fiche (instruction, notes, sections such as « À ne pas oublier »)."},
 	{name: "peek", action: "show", description: "Read another dossier of the store, read-only."},
 	{name: "search", action: "search", description: "Search every dossier of the store, open or closed."},
 	{name: "grep", action: "grep", rename: map[string]string{"id": "dossier"},

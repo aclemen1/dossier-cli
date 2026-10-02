@@ -337,6 +337,9 @@ func init() {
 			if s.Session != "" {
 				fmt.Fprintf(w, "session %s · tab %s\n", s.Session, s.TabID)
 			}
+			if s.Body != "" {
+				fmt.Fprintf(w, "\n%s\n", s.Body)
+			}
 			fmt.Fprintf(w, "\n%s", s.Log)
 		},
 	})

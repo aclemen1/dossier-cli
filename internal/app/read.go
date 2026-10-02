@@ -88,6 +88,7 @@ type ShowResult struct {
 	TabID    string   `json:"tab_id,omitempty"`
 	Files    []string `json:"files"`
 	Children []string `json:"children,omitempty"`
+	Body     string   `json:"body"`
 	Outgoing []Edge   `json:"outgoing"`
 	Incoming []Edge   `json:"incoming"`
 	Log      string   `json:"log"`
@@ -108,6 +109,7 @@ func (a *App) Show(d *dossier.Dossier) ShowResult {
 		}
 	}
 	r.Outgoing, r.Incoming = a.Outgoing(d), a.Incoming(d)
+	r.Body = strings.TrimSpace(d.Body())
 	if b, err := os.ReadFile(d.Path("log.md")); err == nil {
 		r.Log = string(b)
 	}
