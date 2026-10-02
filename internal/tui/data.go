@@ -39,28 +39,6 @@ type storeView struct {
 	count map[string]int
 }
 
-// Stores lists the stores under root: root itself when it is one, otherwise
-// every direct subdirectory that holds a .dossier directory.
-func Stores(root string) []string {
-	if isStore(root) {
-		return []string{root}
-	}
-	entries, _ := os.ReadDir(root)
-	var out []string
-	for _, e := range entries {
-		p := filepath.Join(root, e.Name())
-		if e.IsDir() && isStore(p) {
-			out = append(out, p)
-		}
-	}
-	return out
-}
-
-func isStore(p string) bool {
-	fi, err := os.Stat(filepath.Join(p, ".dossier", "config.toml"))
-	return err == nil && !fi.IsDir()
-}
-
 func shown(d *dossier.Dossier, v view) bool {
 	switch {
 	case v.todo:

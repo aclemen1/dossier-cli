@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -36,6 +37,7 @@ func withApp(ctx *spec.Context, lock bool, fn func(*app.App) (any, error)) (any,
 	if err != nil {
 		return nil, err
 	}
+	routeByPrefix(ctx, a)
 	if lock {
 		if err := a.S.Lock(); err != nil {
 			return nil, err
@@ -583,15 +585,71 @@ func init() {
 		},
 		Examples: []string{"dossier tui", "dossier tui ~/dossiers"},
 		Run: func(ctx *spec.Context) (any, error) {
-			root := store.ExpandHome(ctx.Str("root"))
-			if root == "" {
-				s, err := store.Resolve(ctx.Store)
-				if err != nil {
-					return nil, err
-				}
-				root = filepath.Dir(s.Root)
+			root, err := rootOf(ctx)
+			if err != nil {
+				return nil, err
 			}
 			return nil, tui.Run(root)
+		},
+	})
+
+	spec.Register(&spec.Action{
+		Category: "store", Name: "stores", Summary: "List the stores under a root: sphere, id prefix, charter, open and waiting dossiers.",
+		Discussion: "A store is one sphere of the user's affairs. Read its charter (CLAUDE.md at its root) before working in it: " +
+			"it says what belongs there and how its memory is searched. Pass a store to any action with --store <root>.",
+		Params: []spec.Param{
+			{Name: "root", Kind: spec.String, Positional: true, Help: "Directory holding the stores, or one store. Defaults to the parent of the resolved store."},
+		},
+		Examples: []string{"dossier stores", "dossier stores ~/dossiers --format text"},
+		Run: func(ctx *spec.Context) (any, error) {
+			root, err := rootOf(ctx)
+			if err != nil {
+				return nil, err
+			}
+			def := ""
+			if s, err := store.Resolve(ctx.Store); err == nil {
+				def = s.Root
+			}
+			out := []storeInfo{}
+			for _, dir := range store.Discover(root) {
+				s, err := store.Open(dir)
+				if err != nil {
+					continue
+				}
+				info := storeInfo{Root: dir, Sphere: s.Config.Store.Sphere, Prefix: s.Prefix(), Default: dir == def}
+				if _, err := os.Stat(filepath.Join(dir, "CLAUDE.md")); err == nil {
+					info.Charter = filepath.Join(dir, "CLAUDE.md")
+				}
+				all, _ := (&app.App{S: s}).All()
+				for _, d := range all {
+					switch {
+					case d.State == dossier.Open && !d.NoAction:
+						info.Todo++
+						info.Open++
+					case d.State == dossier.Open:
+						info.Open++
+					case d.State == dossier.Waiting:
+						info.Waiting++
+					}
+				}
+				out = append(out, info)
+			}
+			if len(out) == 0 {
+				return nil, spec.UserError("no dossier store under %s: a store is a directory holding .dossier/config.toml. Create one with `dossier init <dir>`", root)
+			}
+			return out, nil
+		},
+		Text: func(w io.Writer, r any) {
+			for _, s := range r.([]storeInfo) {
+				mark := " "
+				if s.Default {
+					mark = "*"
+				}
+				fmt.Fprintf(w, "%s %-8s %-3s %3d open (%d to do) %3d waiting  %s\n", mark, s.Sphere, s.Prefix, s.Open, s.Todo, s.Waiting, s.Root)
+				if s.Charter != "" {
+					fmt.Fprintf(w, "  charter %s\n", s.Charter)
+				}
+			}
 		},
 	})
 
@@ -710,5 +768,52 @@ func printTree(w io.Writer, n app.TreeNode, indent string) {
 	fmt.Fprintln(w, indent+label)
 	for _, c := range n.Children {
 		printTree(w, c, indent+"  ")
+	}
+}
+
+type storeInfo struct {
+	Root    string `json:"root"`
+	Sphere  string `json:"sphere"`
+	Prefix  string `json:"prefix"`
+	Charter string `json:"charter,omitempty"`
+	Default bool   `json:"default"`
+	Open    int    `json:"open"`
+	Todo    int    `json:"todo"`
+	Waiting int    `json:"waiting"`
+}
+
+// rootOf is the directory holding the stores: the root argument, or the parent
+// of the resolved store.
+func rootOf(ctx *spec.Context) (string, error) {
+	if root := store.ExpandHome(ctx.Str("root")); root != "" {
+		return root, nil
+	}
+	s, err := store.Resolve(ctx.Store)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Dir(s.Root), nil
+}
+
+var prefixRe = regexp.MustCompile(`^([A-Za-z]{1,4})-`)
+
+// routeByPrefix: on the command line without --store, an id of another
+// store's prefix (U-0012 from the perso store) acts in that store. A session
+// (DOSSIER_STORE set) stays in its own store.
+func routeByPrefix(ctx *spec.Context, a *app.App) {
+	if ctx.Store != "" || os.Getenv("DOSSIER_STORE") != "" {
+		return
+	}
+	for _, name := range []string{"id", "from"} {
+		m := prefixRe.FindStringSubmatch(ctx.Str(name))
+		if m == nil {
+			continue
+		}
+		if !strings.EqualFold(m[1], a.S.Prefix()) {
+			if o := a.S.Sibling(m[1]); o != nil {
+				a.S = o
+			}
+		}
+		return
 	}
 }

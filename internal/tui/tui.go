@@ -14,13 +14,14 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/aclemen1/dossier-cli/internal/dossier"
+	"github.com/aclemen1/dossier-cli/internal/store"
 )
 
 const refreshEvery = 5 * time.Second
 
 // Run starts the TUI on the stores found under root.
 func Run(root string) error {
-	roots := Stores(root)
+	roots := store.Discover(root)
 	if len(roots) == 0 {
 		return fmt.Errorf("no dossier store under %s: a store is a directory holding .dossier/config.toml", root)
 	}
@@ -114,6 +115,18 @@ func (m *model) move(step int) {
 			m.cursor = i
 			return
 		}
+	}
+}
+
+// runArgs calls the installed dossier binary with args on the store root.
+func runArgs(root, verb string, args ...string) tea.Cmd {
+	return func() tea.Msg {
+		exe, err := os.Executable()
+		if err != nil {
+			return doneMsg{id: verb, verb: verb, err: err}
+		}
+		out, err := exec.Command(exe, append(args, "--store", root, "--format", "text")...).CombinedOutput()
+		return doneMsg{id: verb, verb: verb, out: strings.TrimSpace(string(out)), err: err}
 	}
 }
 
@@ -283,6 +296,8 @@ func (m *model) key(k string) tea.Cmd {
 		}
 		m.status, m.statusErr = r.d.Label()+": starting its session with the open prompt…", false
 		return run(r.store.root, r.d.ID, "attach")
+	case "+":
+		m.newDossier(r)
 	case "W", "u", "x":
 		if r != nil {
 			return m.stateKey(k, r)
@@ -490,7 +505,7 @@ func (m *model) bottomBar() string {
 		}
 		return strings.Join(parts, sFaint.Render("  ·  "))
 	}
-	line := keyLine([][2]string{{"enter", "pane"}, {"W", "wait"}, {"u", "resume"}, {"x", "close"}, {"n", "no action"},
+	line := keyLine([][2]string{{"+", "new"}, {"enter", "pane"}, {"W", "wait"}, {"u", "resume"}, {"x", "close"}, {"n", "no action"},
 		{"s", "start"}, {"o", "start + prompt"}, {"R", "restart"}}) + "\n" +
 		keyLine([][2]string{{"↑↓", "move"}, {"J K", "scroll"}, {"i", "ingest now"}, {"t", "to do"}, {"w", "by person"}, {"a", "all"},
 			{"p", "priority"}, {"/", "filter"}, {"tab", "detail"}, {"q", "quit"}})

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -37,5 +38,33 @@ func TestWaitFormAsksWhomAndWhenThenRuns(t *testing.T) {
 	}
 	if done, cmd := (&ask{fields: []askField{{}}, done: func([]string) tea.Cmd { return tea.Quit }}).key(tea.KeyMsg{Type: tea.KeyEsc}); !done || cmd != nil {
 		t.Fatal("esc should cancel")
+	}
+}
+
+func TestNewDossierFormNeedsATitleAndKnowsTheStores(t *testing.T) {
+	m := &model{stores: []*storeView{{name: "perso", root: "/p"}, {name: "pro", root: "/u"}}}
+	seance := &row{store: m.stores[1], d: &dossier.Dossier{ID: "U-0006", Alias: "RDIR", State: dossier.Open}}
+	m.newDossier(seance)
+	labels := []string{}
+	for _, f := range m.ask.fields {
+		labels = append(labels, f.label+"="+f.value)
+	}
+	if got := strings.Join(labels, ","); got != "title=,instruction=,store=pro,in=U-RDIR,start session=yes" {
+		t.Fatalf("fields %s", got)
+	}
+	for range m.ask.fields {
+		m.ask.key(tea.KeyMsg{Type: tea.KeyEnter})
+	}
+	if !m.statusErr {
+		t.Fatal("a dossier without a title was accepted")
+	}
+	m.newDossier(nil)
+	typeIn(m.ask, "Armoire")
+	var cmd tea.Cmd
+	for range m.ask.fields {
+		_, cmd = m.ask.key(tea.KeyMsg{Type: tea.KeyEnter})
+	}
+	if cmd == nil || m.statusErr {
+		t.Fatalf("the form did not open the dossier: %s", m.status)
 	}
 }

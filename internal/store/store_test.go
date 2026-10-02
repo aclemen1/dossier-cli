@@ -149,3 +149,19 @@ func TestExpandHome(t *testing.T) {
 		t.Fatalf("got %s", got)
 	}
 }
+
+func TestResolveNamesASiblingStoreBySphere(t *testing.T) {
+	root := t.TempDir()
+	perso, _ := Init(filepath.Join(root, "perso"), "perso", false)
+	if _, err := Init(filepath.Join(root, "pro"), "pro", false); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("DOSSIER_STORE", perso.Root)
+	s, err := Resolve("pro")
+	if err != nil || filepath.Base(s.Root) != "pro" {
+		t.Fatalf("resolve pro: %v %v", s, err)
+	}
+	if _, err := Resolve("nope"); err == nil {
+		t.Fatal("an unknown sphere was resolved")
+	}
+}

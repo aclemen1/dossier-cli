@@ -114,3 +114,72 @@ func (m *model) stateKey(k string, r *row) tea.Cmd {
 	}
 	return nil
 }
+
+// newDossier opens the form of the + key: title, instruction, store, the
+// dossier that includes it, and whether to start its session.
+func (m *model) newDossier(r *row) {
+	stores := make([]string, 0, len(m.stores))
+	for _, sv := range m.stores {
+		stores = append(stores, sv.name)
+	}
+	store, in := "", ""
+	if r != nil {
+		store = r.store.name
+		if r.d.Alias != "" || len(r.d.Targets(dossier.RelIncludes)) > 0 {
+			in = r.d.Label()
+		}
+	} else if len(m.stores) > 0 {
+		store = m.stores[0].name
+	}
+	fields := []askField{
+		{label: "title", hint: "short name of the affair"},
+		{label: "instruction", hint: "what the agent should do; empty: the store's default"},
+	}
+	if len(stores) > 1 {
+		fields = append(fields, askField{label: "store", value: store, hint: strings.Join(stores, " or ")})
+	}
+	fields = append(fields,
+		askField{label: "in", value: in, hint: "dossier that includes it, e.g. a meeting; empty: on its own"},
+		askField{label: "start session", value: "yes", hint: "yes: its agent starts on the instruction; no: later, with s or o"})
+	m.ask = &ask{title: "New dossier", fields: fields, done: func(v []string) tea.Cmd {
+		get := func(label string) string {
+			for i, f := range fields {
+				if f.label == label {
+					return v[i]
+				}
+			}
+			return ""
+		}
+		title := get("title")
+		if title == "" {
+			m.status, m.statusErr = "a dossier needs a title", true
+			return nil
+		}
+		root := ""
+		want := get("store")
+		if want == "" {
+			want = store
+		}
+		for _, sv := range m.stores {
+			if strings.EqualFold(sv.name, want) {
+				root = sv.root
+			}
+		}
+		if root == "" {
+			m.status, m.statusErr = "no store named "+want+": "+strings.Join(stores, ", "), true
+			return nil
+		}
+		args := []string{"open", "--title", title}
+		if i := get("instruction"); i != "" {
+			args = append(args, "--instruction", i)
+		}
+		if in := get("in"); in != "" {
+			args = append(args, "--in", in)
+		}
+		if a := strings.ToLower(get("start session")); a == "no" || a == "n" || a == "non" {
+			args = append(args, "--no-start")
+		}
+		m.status, m.statusErr = "opening "+title+"…", false
+		return runArgs(root, "open", args...)
+	}}
+}

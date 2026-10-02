@@ -42,12 +42,42 @@ func userConfigPath() string {
 
 // Resolve finds the store: --store, then DOSSIER_STORE, then the store that
 // contains the working directory, then default_store.
+// A --store without a path separator that is no directory names a sibling of
+// the default store by its sphere or directory name: --store pro.
 func Resolve(flag string) (*Store, error) {
-	candidates := []string{flag, os.Getenv("DOSSIER_STORE")}
-	for _, c := range candidates {
-		if c != "" {
-			return Open(ExpandHome(c))
+	if flag != "" && !strings.ContainsRune(flag, filepath.Separator) {
+		if _, err := os.Stat(flag); err != nil {
+			base, err := resolveDefault()
+			if err != nil {
+				return nil, err
+			}
+			for _, dir := range Discover(filepath.Dir(base.Root)) {
+				if s, err := Open(dir); err == nil && (strings.EqualFold(s.Config.Store.Sphere, flag) || strings.EqualFold(filepath.Base(dir), flag)) {
+					return s, nil
+				}
+			}
+			return nil, spec.NotFound("no store named %q next to %s. List them with `dossier stores`", flag, base.Root)
 		}
+	}
+	if flag != "" {
+		return Open(ExpandHome(flag))
+	}
+	return resolveDefault()
+}
+
+// Sibling is the store next to s whose dossiers carry this id prefix.
+func (s *Store) Sibling(prefix string) *Store {
+	for _, dir := range Discover(filepath.Dir(s.Root)) {
+		if o, err := Open(dir); err == nil && strings.EqualFold(o.Prefix(), prefix) {
+			return o
+		}
+	}
+	return nil
+}
+
+func resolveDefault() (*Store, error) {
+	if c := os.Getenv("DOSSIER_STORE"); c != "" {
+		return Open(ExpandHome(c))
 	}
 	if wd, err := os.Getwd(); err == nil {
 		for d := wd; ; d = filepath.Dir(d) {
@@ -254,4 +284,26 @@ func (s *Store) PromptTemplate(name string) (string, error) {
 		return "", spec.UserError("cannot read prompt template %s: %v", p, err)
 	}
 	return string(b), nil
+}
+
+// Discover lists the stores under root: root itself when it is one, otherwise
+// every direct subdirectory that holds a .dossier/config.toml.
+func Discover(root string) []string {
+	if isStore(root) {
+		return []string{root}
+	}
+	entries, _ := os.ReadDir(root)
+	var out []string
+	for _, e := range entries {
+		p := filepath.Join(root, e.Name())
+		if e.IsDir() && isStore(p) {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+func isStore(p string) bool {
+	fi, err := os.Stat(filepath.Join(p, ".dossier", "config.toml"))
+	return err == nil && !fi.IsDir()
 }

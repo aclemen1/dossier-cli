@@ -33,10 +33,10 @@ func TestTreeNestsIncludedDossiersAndSurvivesCycles(t *testing.T) {
 	if err := b.Save(); err != nil {
 		t.Fatal(err)
 	}
-	if got := Stores(root); len(got) != 1 {
+	if got := store.Discover(root); len(got) != 1 {
 		t.Fatalf("stores %v", got)
 	}
-	rows, _, errs := load(Stores(root), view{})
+	rows, _, errs := load(store.Discover(root), view{})
 	if len(errs) > 0 {
 		t.Fatal(errs)
 	}
@@ -56,7 +56,7 @@ func TestTreeNestsIncludedDossiersAndSurvivesCycles(t *testing.T) {
 	if strings.Join(got, ",") != want {
 		t.Fatalf("rows\n got %s\nwant %s", strings.Join(got, ","), want)
 	}
-	if rows, _, _ := load(Stores(root), view{filter: "seul"}); len(rows) != 2 || rows[1].d.Title != "Seul" {
+	if rows, _, _ := load(store.Discover(root), view{filter: "seul"}); len(rows) != 2 || rows[1].d.Title != "Seul" {
 		t.Fatalf("filter: %+v", rows)
 	}
 }
@@ -70,7 +70,7 @@ func TestLinksGroupEveryRelationOfALinkedDossier(t *testing.T) {
 	a.Open(app.OpenParams{Title: "Point", NoStart: true})
 	a.Link("1", "2", dossier.RelIncludes)
 	a.Link("1", "2", dossier.RelDependsOn)
-	rows, _, _ := load(Stores(root), view{})
+	rows, _, _ := load(store.Discover(root), view{})
 	ls := links(rows[1].store, rows[1].d)
 	if len(ls) != 1 || ls[0].id != "D-0002" || strings.Join(ls[0].rels, ",") != "includes,depends on" {
 		t.Fatalf("séance links %+v", ls)
@@ -94,7 +94,7 @@ func TestWaitingRowsGroupByPersonSoonestFirst(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	rows, _, _ := load(Stores(root), view{byPerson: true})
+	rows, _, _ := load(store.Discover(root), view{byPerson: true})
 	var got []string
 	for _, r := range rows {
 		switch {
@@ -125,7 +125,7 @@ func TestPriorityRaisesAMeetingWhosePointIsDue(t *testing.T) {
 		a.SetState(d, "wait", "", "Patricia")
 	}
 	order := func(v view) string {
-		rows, _, _ := load(Stores(root), v)
+		rows, _, _ := load(store.Discover(root), v)
 		var got []string
 		for _, r := range rows {
 			if r.d != nil {
