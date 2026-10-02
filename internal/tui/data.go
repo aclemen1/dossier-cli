@@ -221,3 +221,49 @@ func logTail(d *dossier.Dossier, n int) []string {
 	}
 	return lines
 }
+
+// linked is one dossier linked to the selected one, with every relation
+// between them, named from the selected dossier's side.
+type linked struct {
+	id, title, state string
+	rels             []string
+}
+
+var (
+	outName = map[string]string{"includes": "includes", "depends_on": "depends on", "parent": "child of", "merged_into": "merged into"}
+	inName  = map[string]string{"includes": "included by", "depends_on": "needed by", "parent": "parent of", "merged_into": "merged from"}
+)
+
+func links(sv *storeView, d *dossier.Dossier) []linked {
+	var out []linked
+	pos := map[string]int{}
+	add := func(e app.Edge, names map[string]string) {
+		rel := names[e.Rel]
+		if rel == "" {
+			rel = e.Rel
+		}
+		i, ok := pos[e.ID]
+		if !ok {
+			i = len(out)
+			pos[e.ID] = i
+			id := e.ID
+			if t := sv.byID[e.ID]; t != nil {
+				id = t.Label()
+			}
+			out = append(out, linked{id: id, title: e.Title, state: e.State})
+		}
+		for _, r := range out[i].rels {
+			if r == rel {
+				return
+			}
+		}
+		out[i].rels = append(out[i].rels, rel)
+	}
+	for _, e := range sv.a.Outgoing(d) {
+		add(e, outName)
+	}
+	for _, e := range sv.a.Incoming(d) {
+		add(e, inName)
+	}
+	return out
+}

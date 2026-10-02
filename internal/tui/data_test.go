@@ -57,3 +57,25 @@ func TestTreeNestsIncludedDossiersAndSurvivesCycles(t *testing.T) {
 		t.Fatalf("filter: %+v", rows)
 	}
 }
+
+func TestLinksGroupEveryRelationOfALinkedDossier(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	root := t.TempDir()
+	s, _ := store.Init(filepath.Join(root, "pro"), "pro", false)
+	a := &app.App{S: s}
+	a.Open(app.OpenParams{Title: "Séance", NoStart: true})
+	a.Open(app.OpenParams{Title: "Point", NoStart: true})
+	a.Link("1", "2", dossier.RelIncludes)
+	p, _ := a.Load("2")
+	p.Parent = "D-0001"
+	p.Save()
+	rows, _ := load(Stores(root), false, "")
+	ls := links(rows[1].store, rows[1].d)
+	if len(ls) != 1 || ls[0].id != "D-0002" || strings.Join(ls[0].rels, ",") != "includes,parent of" {
+		t.Fatalf("séance links %+v", ls)
+	}
+	ls = links(rows[2].store, rows[2].d)
+	if len(ls) != 1 || strings.Join(ls[0].rels, ",") != "child of,included by" {
+		t.Fatalf("point links %+v", ls)
+	}
+}

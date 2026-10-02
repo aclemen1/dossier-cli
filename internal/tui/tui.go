@@ -448,15 +448,17 @@ func (m *model) detailView(w, h int) string {
 		line(label.Render("source") + sText.Render(truncate(s.ID, w-12)))
 	}
 
-	out, in := r.store.a.Outgoing(d), r.store.a.Incoming(d)
-	if len(out)+len(in) > 0 {
+	if ls := links(r.store, d); len(ls) > 0 {
 		line("")
 		line(sBold.Render("Links"))
-		for _, e := range out {
-			line(edge("→", e.Rel, labelOf(r.store, e.ID), e.Title, e.State, w))
+		relW := 0
+		for _, l := range ls {
+			if n := lipgloss.Width(strings.Join(l.rels, " · ")); n > relW {
+				relW = n
+			}
 		}
-		for _, e := range in {
-			line(edge("←", e.Rel, labelOf(r.store, e.ID), e.Title, e.State, w))
+		for _, l := range ls {
+			line(edge(strings.Join(l.rels, " · "), relW, l.id, l.title, l.state, w))
 		}
 	}
 	if d.Description != "" {
@@ -485,16 +487,9 @@ func aliasNote(d *dossier.Dossier) string {
 	return sMuted.Render(" · " + d.ID)
 }
 
-func edge(arrow, rel, id, title, state string, w int) string {
-	head := sMuted.Render(fmt.Sprintf(" %s %-11s ", arrow, rel)) + sBold.Render(id) + " "
+func edge(rels string, relW int, id, title, state string, w int) string {
+	head := sMuted.Render(" "+rels+strings.Repeat(" ", relW-lipgloss.Width(rels))+"  ") + sBold.Render(id) + " "
 	st := stateStyle(state).Render(state)
 	room := w - lipgloss.Width(head) - lipgloss.Width(st) - 2
 	return head + sText.Render(truncate(title, room)) + " " + st
-}
-
-func labelOf(s *storeView, id string) string {
-	if d := s.byID[id]; d != nil {
-		return d.Label()
-	}
-	return id
 }
