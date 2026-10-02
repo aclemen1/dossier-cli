@@ -171,6 +171,17 @@ func splitFrontmatter(s string) (fm, body string, err error) {
 // person or an agent added, the managed links block included.
 func (d *Dossier) Body() string { return d.body }
 
+// Notes is the body without the managed links block.
+func (d *Dossier) Notes() string {
+	b := d.body
+	if i := strings.Index(b, linksBegin); i >= 0 {
+		if j := strings.Index(b, linksEnd); j > i {
+			b = b[:i] + b[j+len(linksEnd):]
+		}
+	}
+	return strings.TrimSpace(b)
+}
+
 // SetBody replaces the Markdown body. Only used at creation.
 func (d *Dossier) SetBody(b string) { d.body = b }
 

@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/aclemen1/dossier-cli/internal/app"
 	"github.com/aclemen1/dossier-cli/internal/dossier"
@@ -22,12 +23,18 @@ type row struct {
 	last     []bool // per ancestor level: was that ancestor the last child
 	blocked  []string
 	cycle    bool // already shown above on this branch
+	person   bool // header of a waiting group
+	count    int
 }
+
+func (r row) spacer() bool { return r.d == nil && r.header == "" }
 
 type storeView struct {
 	name  string
 	root  string
 	a     *app.App
+	all   []*dossier.Dossier
+	live  map[string]string
 	byID  map[string]*dossier.Dossier
 	count map[string]int
 }
@@ -65,8 +72,11 @@ func shown(d *dossier.Dossier, all bool, filter string) bool {
 	return strings.Contains(hay, strings.ToLower(filter))
 }
 
-func load(roots []string, all bool, filter string) ([]row, []string) {
+// load reads every store. byPerson lays the waiting dossiers out by whom they
+// wait on instead of the store trees.
+func load(roots []string, all bool, filter string, byPerson bool) ([]row, []*storeView, []string) {
 	var rows []row
+	var stores []*storeView
 	var errs []string
 	live := app.Panes()
 	for _, root := range roots {
@@ -85,15 +95,91 @@ func load(roots []string, all bool, filter string) ([]row, []string) {
 		if name == "" {
 			name = filepath.Base(root)
 		}
-		sv := &storeView{name: name, root: root, a: a, byID: map[string]*dossier.Dossier{}, count: map[string]int{}}
+		sv := &storeView{name: name, root: root, a: a, all: ds, live: live, byID: map[string]*dossier.Dossier{}, count: map[string]int{}}
+		stores = append(stores, sv)
 		for _, d := range ds {
 			sv.byID[d.ID] = d
 			sv.count[d.State]++
 		}
+		if byPerson {
+			continue
+		}
+		if len(rows) > 0 {
+			rows = append(rows, row{})
+		}
 		rows = append(rows, row{header: name, store: sv})
 		rows = append(rows, treeRows(sv, ds, live, all, filter)...)
 	}
-	return rows, errs
+	if byPerson {
+		rows = waitingRows(stores, filter)
+	}
+	return rows, stores, errs
+}
+
+// waitingRows groups the waiting dossiers of every store by whom they wait on;
+// the person to chase first comes first, and within a person the soonest date.
+func waitingRows(stores []*storeView, filter string) []row {
+	type group struct {
+		name  string
+		first string
+		rows  []row
+	}
+	var groups []*group
+	byName := map[string]*group{}
+	for _, sv := range stores {
+		for _, d := range sv.all {
+			if d.State != dossier.Waiting || !shown(d, false, filter) {
+				continue
+			}
+			name := PersonOf(d.WaitingOn)
+			key := strings.ToLower(name)
+			g := byName[key]
+			if g == nil {
+				g = &group{name: name}
+				byName[key] = g
+				groups = append(groups, g)
+			}
+			g.rows = append(g.rows, row{store: sv, d: d, activity: app.Activity(d, sv.live), blocked: app.BlockedBy(d, sv.byID)})
+		}
+	}
+	for _, g := range groups {
+		sort.SliceStable(g.rows, func(i, j int) bool { return untilKey(g.rows[i].d) < untilKey(g.rows[j].d) })
+		g.first = untilKey(g.rows[0].d)
+	}
+	sort.SliceStable(groups, func(i, j int) bool { return groups[i].first < groups[j].first })
+	var out []row
+	for i, g := range groups {
+		if i > 0 {
+			out = append(out, row{})
+		}
+		out = append(out, row{header: g.name, person: true, count: len(g.rows)})
+		out = append(out, g.rows...)
+	}
+	return out
+}
+
+// untilKey sorts by chase date; a wait without a date comes last.
+func untilKey(d *dossier.Dossier) string {
+	if d.WaitUntil == "" {
+		return "~"
+	}
+	if t, err := time.Parse(time.RFC3339, d.WaitUntil); err == nil {
+		return t.UTC().Format(time.RFC3339)
+	}
+	return d.WaitUntil
+}
+
+// PersonOf is the short name of whom a dossier waits on: "Livit
+// (service@livit.ch)" is Livit.
+func PersonOf(on string) string {
+	on = strings.TrimSpace(on)
+	if i := strings.IndexAny(on, "(,"); i > 0 {
+		return strings.TrimSpace(on[:i])
+	}
+	if on == "" {
+		return "?"
+	}
+	return on
 }
 
 // treeRows lays the shown dossiers out as a forest: a dossier appears under
@@ -148,13 +234,26 @@ func treeRows(sv *storeView, ds []*dossier.Dossier, live map[string]string, all 
 		delete(path, id)
 	}
 	for _, id := range roots {
+		// A dossier with its points stands apart from its neighbours.
+		grouped := len(children[id]) > 0
+		if grouped && len(out) > 0 && !out[len(out)-1].spacer() {
+			out = append(out, row{})
+		}
 		walk(id, 0, nil, map[string]bool{})
+		if grouped {
+			out = append(out, row{})
+		}
+	}
+	if n := len(out); n > 0 && out[n-1].spacer() {
+		out = out[:n-1]
 	}
 	// A cycle of links leaves dossiers that no root reaches: start from them too.
 	for {
 		seen := map[string]bool{}
 		for _, r := range out {
-			seen[r.d.ID] = true
+			if r.d != nil {
+				seen[r.d.ID] = true
+			}
 		}
 		var rest []string
 		for _, d := range ds {

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -34,7 +35,7 @@ func TestTreeNestsIncludedDossiersAndSurvivesCycles(t *testing.T) {
 	if got := Stores(root); len(got) != 1 {
 		t.Fatalf("stores %v", got)
 	}
-	rows, errs := load(Stores(root), false, "")
+	rows, _, errs := load(Stores(root), false, "", false)
 	if len(errs) > 0 {
 		t.Fatal(errs)
 	}
@@ -54,7 +55,7 @@ func TestTreeNestsIncludedDossiersAndSurvivesCycles(t *testing.T) {
 	if strings.Join(got, ",") != want {
 		t.Fatalf("rows\n got %s\nwant %s", strings.Join(got, ","), want)
 	}
-	if rows, _ := load(Stores(root), false, "seul"); len(rows) != 2 || rows[1].d.Title != "Seul" {
+	if rows, _, _ := load(Stores(root), false, "seul", false); len(rows) != 2 || rows[1].d.Title != "Seul" {
 		t.Fatalf("filter: %+v", rows)
 	}
 }
@@ -68,7 +69,7 @@ func TestLinksGroupEveryRelationOfALinkedDossier(t *testing.T) {
 	a.Open(app.OpenParams{Title: "Point", NoStart: true})
 	a.Link("1", "2", dossier.RelIncludes)
 	a.Link("1", "2", dossier.RelDependsOn)
-	rows, _ := load(Stores(root), false, "")
+	rows, _, _ := load(Stores(root), false, "", false)
 	ls := links(rows[1].store, rows[1].d)
 	if len(ls) != 1 || ls[0].id != "D-0002" || strings.Join(ls[0].rels, ",") != "includes,depends on" {
 		t.Fatalf("séance links %+v", ls)
@@ -76,5 +77,33 @@ func TestLinksGroupEveryRelationOfALinkedDossier(t *testing.T) {
 	ls = links(rows[2].store, rows[2].d)
 	if len(ls) != 1 || strings.Join(ls[0].rels, ",") != "included by,needed by" {
 		t.Fatalf("point links %+v", ls)
+	}
+}
+
+func TestWaitingRowsGroupByPersonSoonestFirst(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	root := t.TempDir()
+	s, _ := store.Init(filepath.Join(root, "pro"), "pro", false)
+	a := &app.App{S: s}
+	for i, w := range [][2]string{{"Livit (service@livit.ch)", "2026-12-01"}, {"Patricia", "2026-11-01"}, {"livit", "2026-10-15"}} {
+		a.Open(app.OpenParams{Title: w[0], NoStart: true})
+		d, _ := a.Load(strconv.Itoa(i + 1))
+		d.WaitUntil = w[1] + "T23:59:59+01:00"
+		if _, err := a.SetState(d, "wait", "", w[0]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rows, _, _ := load(Stores(root), false, "", true)
+	var got []string
+	for _, r := range rows {
+		switch {
+		case r.person:
+			got = append(got, "#"+r.header)
+		case r.d != nil:
+			got = append(got, r.d.ID)
+		}
+	}
+	if want := "#Livit,D-0003,D-0001,#Patricia,D-0002"; strings.Join(got, ",") != want {
+		t.Fatalf("got %s want %s", strings.Join(got, ","), want)
 	}
 }
