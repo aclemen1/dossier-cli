@@ -151,7 +151,7 @@ type OpenParams struct {
 	Summary     map[string]any
 	Files       []connector.File
 	Alias       string
-	Agenda      []string // aliases or ids of meetings that include this dossier
+	In          []string // aliases or ids of the dossiers that include this one
 	NoStart     bool
 }
 
@@ -194,25 +194,25 @@ func (a *App) route(instruction string) (*dossier.Dossier, string) {
 	return nil, ""
 }
 
-// Open opens or finds the dossier, then makes every meeting of p.Agenda include it.
+// Open opens or finds the dossier, then makes every dossier of p.In include it.
 func (a *App) Open(p OpenParams) (OpenResult, error) {
 	res, err := a.open(p)
 	if err != nil || res.ID == "" {
 		return res, err
 	}
-	for _, meeting := range p.Agenda {
-		if lerr := a.addToAgenda(meeting, res.ID); lerr != nil {
+	for _, holder := range p.In {
+		if lerr := a.includeIn(holder, res.ID); lerr != nil {
 			res.Warnings = append(res.Warnings, lerr.Error())
 		}
 	}
 	return res, nil
 }
 
-// addToAgenda makes the meeting dossier include the dossier, once.
-func (a *App) addToAgenda(meeting, id string) error {
-	m, err := a.Load(meeting)
+// includeIn makes the holder dossier include the dossier, once.
+func (a *App) includeIn(holder, id string) error {
+	m, err := a.Load(holder)
 	if err != nil {
-		return fmt.Errorf("agenda %s: %w", meeting, err)
+		return fmt.Errorf("in %s: %w", holder, err)
 	}
 	if m.ID == id || m.HasLink(dossier.RelIncludes, id) {
 		return nil

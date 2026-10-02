@@ -414,7 +414,7 @@ func (a *App) Ingest(names []string, dryRun bool) ([]IngestReport, error) {
 		failed := false
 		for _, s := range res.Signals {
 			r, err := a.Open(OpenParams{Title: s.Title, SourceRef: s.SourceRef, ThreadRef: s.ThreadRef, URL: s.URL,
-				Instruction: s.Instruction, Summary: s.Summary, Files: s.Files, Agenda: s.Agenda})
+				Instruction: s.Instruction, Summary: s.Summary, Files: s.Files, In: s.In})
 			if err != nil {
 				rep.Errors = append(rep.Errors, s.SourceRef+": "+err.Error())
 				if r.ID == "" {
@@ -434,8 +434,8 @@ func (a *App) Ingest(names []string, dryRun bool) ([]IngestReport, error) {
 				rep.Skipped = append(rep.Skipped, "event on unknown thread "+e.ThreadRef)
 				continue
 			}
-			for _, meeting := range e.Agenda {
-				if err := a.addToAgenda(meeting, d.ID); err != nil {
+			for _, holder := range e.In {
+				if err := a.includeIn(holder, d.ID); err != nil {
 					rep.Errors = append(rep.Errors, err.Error())
 				}
 			}

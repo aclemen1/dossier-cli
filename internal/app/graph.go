@@ -9,7 +9,7 @@ import (
 	"github.com/aclemen1/dossier-cli/internal/spec"
 )
 
-var relHint = "includes (B is a point of A: agenda item, sub-affair) or depends_on (A waits for B)"
+var relHint = "includes (B is part of A: an item of a meeting, a sub-affair) or depends_on (A waits for B)"
 
 func validRel(rel string) error {
 	if rel == dossier.RelIncludes || rel == dossier.RelDependsOn {

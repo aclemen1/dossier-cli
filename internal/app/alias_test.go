@@ -39,10 +39,10 @@ func TestAliasesNameLastingDossiers(t *testing.T) {
 	}
 }
 
-func TestAgendaPutsTheDossierOnTheMeeting(t *testing.T) {
+func TestInMakesTheHolderIncludeTheDossier(t *testing.T) {
 	f := newFixture(t)
 	f.a.Open(OpenParams{Title: "Séance RDIR", Alias: "RDIR", NoStart: true})
-	r, err := f.a.Open(OpenParams{Title: "Chiffres étudiants FBM", SourceRef: "fake:thread/fbm", Agenda: []string{"RDIR"}, NoStart: true})
+	r, err := f.a.Open(OpenParams{Title: "Chiffres étudiants FBM", SourceRef: "fake:thread/fbm", In: []string{"RDIR"}, NoStart: true})
 	if err != nil || len(r.Warnings) != 0 {
 		t.Fatalf("open %+v %v", r, err)
 	}
@@ -50,13 +50,13 @@ func TestAgendaPutsTheDossierOnTheMeeting(t *testing.T) {
 	if !meeting.HasLink(dossier.RelIncludes, r.ID) {
 		t.Fatalf("meeting links %v", meeting.Links)
 	}
-	again, _ := f.a.Open(OpenParams{Title: "Chiffres étudiants FBM", SourceRef: "fake:thread/fbm", Agenda: []string{"RDIR"}, NoStart: true})
+	again, _ := f.a.Open(OpenParams{Title: "Chiffres étudiants FBM", SourceRef: "fake:thread/fbm", In: []string{"RDIR"}, NoStart: true})
 	meeting, _ = f.a.Load("RDIR")
 	if again.Outcome != "existing" || len(meeting.Links) != 1 {
 		t.Fatalf("second signal %+v, links %v", again, meeting.Links)
 	}
-	missing, _ := f.a.Open(OpenParams{Title: "X", Agenda: []string{"PSEC"}, NoStart: true})
-	if len(missing.Warnings) != 1 || !strings.Contains(missing.Warnings[0], "agenda PSEC") {
+	missing, _ := f.a.Open(OpenParams{Title: "X", In: []string{"PSEC"}, NoStart: true})
+	if len(missing.Warnings) != 1 || !strings.Contains(missing.Warnings[0], "in PSEC") {
 		t.Fatalf("unknown meeting should warn: %+v", missing)
 	}
 }

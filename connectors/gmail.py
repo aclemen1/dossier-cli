@@ -200,18 +200,18 @@ def task_message_id(task):
 
 
 def tasklists(cfg):
-    """{tasklist id: meeting alias or ""} from config.tasklists ({title: alias}) or config.tasklist."""
+    """{tasklist id: alias of the dossier that includes its tasks, or ""} from config.tasklists ({title: alias}) or config.tasklist."""
     wanted = cfg.get("tasklists") or {cfg.get("tasklist", "@default"): ""}
     titles = {}
     if any(k != "@default" for k in wanted):
         page = gws("tasks", "tasklists", "list", params={"maxResults": 100, "fields": "items(id,title),etag"})
         titles = {l["title"]: l["id"] for l in page.get("items", [])}
     out = {}
-    for title, meeting in wanted.items():
+    for title, holder in wanted.items():
         if title == "@default":
-            out["@default"] = meeting or ""
+            out["@default"] = holder or ""
         elif title in titles:
-            out[titles[title]] = meeting or ""
+            out[titles[title]] = holder or ""
         else:
             raise Fail(f"no Google Tasks list titled {title!r} on this account; lists: {', '.join(sorted(titles))}")
     return out
@@ -308,10 +308,10 @@ def poll(inp):
     tmpdir = tempfile.mkdtemp(prefix="dossier-gmail-")
 
     # 1. Shift-T tasks: their notes are instructions, their list may name a
-    # meeting; an unstarred message gets its star.
-    instructions, task_titles, task_threads, agendas = {}, {}, {}, {}
+    # dossier that includes it; an unstarred message gets its star.
+    instructions, task_titles, task_threads, holders = {}, {}, {}, {}
     known = set(cur.get("lists") or [])
-    for tasklist, meeting in lists.items():
+    for tasklist, holder in lists.items():
         # A list read for the first time is read whole, whatever the cursor says.
         since = cur.get("at", "") if (tasklist in known or not cur.get("lists") and tasklist == "@default") else ""
         for task in list_tasks(tasklist, since):
@@ -324,8 +324,8 @@ def poll(inp):
                       params={"userId": "me", "id": mid, "format": "minimal", "fields": "threadId"})["threadId"]
             task_threads[tid] = mid
             task_titles.setdefault(tid, task.get("title") or "")
-            if meeting:
-                agendas.setdefault(tid, set()).add(meeting)
+            if holder:
+                holders.setdefault(tid, set()).add(holder)
             if (task.get("notes") or "").strip():
                 instructions[tid] = task["notes"].strip()
             if not any(STARRED in labels for _, labels in thread_labels(tid)) and not dry:
@@ -344,12 +344,12 @@ def poll(inp):
     for tid, mid in candidates.items():
         ref = f"gmail:thread/{tid}"
         if ref in watch:
-            if tid in instructions or tid in agendas:
+            if tid in instructions or tid in holders:
                 summary = {"instruction": instructions[tid]} if tid in instructions else {}
-                if tid in agendas:
-                    summary["agenda"] = ", ".join(sorted(agendas[tid]))
+                if tid in holders:
+                    summary["in"] = ", ".join(sorted(holders[tid]))
                 events.append({"thread_ref": ref, "kind": "instruction", "summary": summary,
-                               "files": [], "at": started, "agenda": sorted(agendas.get(tid, ()))})
+                               "files": [], "at": started, "in": sorted(holders.get(tid, ()))})
             continue
         labels = thread_labels(tid)
         if not any(yellow(l) for _, l in labels) and not (tid in task_threads and dry):
@@ -374,7 +374,7 @@ def poll(inp):
             "files": [{"name": "thread.md", "content": render_messages(tid, subject, msgs)}, *attachment_files(msgs, tmpdir)],
             "url": message_url(mid),
             "at": started,
-            "agenda": sorted(agendas.get(tid, ())),
+            "in": sorted(holders.get(tid, ())),
         })
 
     # 3. Replies on the threads dossier watches.

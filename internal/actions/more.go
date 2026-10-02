@@ -66,8 +66,8 @@ func init() {
 	})
 
 	spec.Register(&spec.Action{
-		Category: "graph", Name: "notify", Summary: "Send an event to a dossier that <from> includes (agenda follow-up).",
-		Discussion: "Only along an includes link: a meeting dossier tells each of its points what was decided.",
+		Category: "graph", Name: "notify", Summary: "Send an event to a dossier that <from> includes, e.g. what a meeting decided.",
+		Discussion: "Only along an includes link: a dossier tells each dossier it includes what was decided, e.g. a meeting its items.",
 		Params: []spec.Param{
 			{Name: "from", Kind: spec.String, Positional: true, Required: true, Help: "Dossier that includes <to>."},
 			{Name: "to", Kind: spec.String, Positional: true, Required: true, Help: "Included dossier."},

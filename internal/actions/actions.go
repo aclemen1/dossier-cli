@@ -233,7 +233,7 @@ func init() {
 			{Name: "url", Kind: spec.String, Help: "Link to the original item."},
 			{Name: "file", Kind: spec.StringList, Help: "File copied into context/ (repeatable)."},
 			{Name: "alias", Kind: spec.String, Help: "Name for a lasting dossier, e.g. RDIR for a recurring meeting."},
-			{Name: "agenda", Kind: spec.StringList, Help: "Dossier (alias or id) that includes this one, e.g. a meeting (repeatable)."},
+			{Name: "in", Kind: spec.StringList, Help: "Dossier (alias or id) that includes this one (repeatable)."},
 			{Name: "no-start", Kind: spec.Bool, Help: "Create the dossier without starting its session."},
 		},
 		Effects: []string{
@@ -243,7 +243,7 @@ func init() {
 		Examples: []string{
 			`dossier open --title "Armoire de pharmacie" --instruction "Demander une date de passage"`,
 			`dossier open --title "Devis toiture" --file ~/Downloads/devis.pdf --no-start`,
-			`dossier open --title "Relance gérance" --agenda D-0042`,
+			`dossier open --title "Relance gérance" --in D-0042`,
 		},
 		Run: func(ctx *spec.Context) (any, error) {
 			return withApp(ctx, true, func(a *app.App) (any, error) {
@@ -265,7 +265,7 @@ func init() {
 				}
 				return a.Open(app.OpenParams{Title: ctx.Str("title"), Instruction: instr, SourceRef: ctx.Str("source"),
 					ThreadRef: ctx.Str("thread"), URL: ctx.Str("url"), Files: files, NoStart: ctx.Bool("no-start"),
-					Alias: ctx.Str("alias"), Agenda: ctx.List("agenda")})
+					Alias: ctx.Str("alias"), In: ctx.List("in")})
 			})
 		},
 		Text: func(w io.Writer, r any) {
@@ -478,10 +478,10 @@ func init() {
 
 	// ---------------------------------------------------------------- graph
 	relParam := spec.Param{Name: "rel", Kind: spec.String, Required: true, Enum: []string{"includes", "depends_on"},
-		Help: "includes: <to> is a point of <from> (agenda item, sub-affair). depends_on: <from> waits for <to>."}
+		Help: "includes: <to> is part of <from> (an item of a meeting, a sub-affair). depends_on: <from> waits for <to>."}
 	spec.Register(&spec.Action{
 		Category: "graph", Name: "link", Summary: "Add a typed link from one dossier to another.",
-		Discussion: "Links are stored on <from>. includes builds agendas and sub-affairs; depends_on marks <from> as blocked " +
+		Discussion: "Links are stored on <from>. includes groups dossiers under another; depends_on marks <from> as blocked " +
 			"until <to> is done, and <from> hears when it closes. Cycles are refused.",
 		Params: []spec.Param{
 			{Name: "from", Kind: spec.String, Positional: true, Required: true, Help: "Dossier that holds the link."},
@@ -516,7 +516,7 @@ func init() {
 		},
 	})
 	spec.Register(&spec.Action{
-		Category: "graph", Name: "tree", Summary: "Walk the links of a dossier: an agenda and what blocks its points.",
+		Category: "graph", Name: "tree", Summary: "Walk the links of a dossier: what it includes and what blocks it.",
 		Params: []spec.Param{
 			idParam("Root dossier. Defaults to DOSSIER_ID."),
 			{Name: "rel", Kind: spec.String, Default: "all", Enum: []string{"all", "includes", "depends_on"}, Help: "Link types to follow."},
