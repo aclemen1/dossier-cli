@@ -82,7 +82,7 @@ func (c *mcpClient) call(t *testing.T, name string, args map[string]any) (map[st
 	return env, r["isError"].(bool)
 }
 
-func TestMCPListsScopedTools(t *testing.T) {
+func TestMCPListsTools(t *testing.T) {
 	storeWith(t, "Séance")
 	c := startMCP(t)
 	init := c.rpc(t, "initialize", map[string]any{"protocolVersion": "2025-06-18"})["result"].(map[string]any)
@@ -95,7 +95,7 @@ func TestMCPListsScopedTools(t *testing.T) {
 		m := x.(map[string]any)
 		byName[m["name"].(string)] = m
 	}
-	for _, n := range []string{"show", "peek", "search", "grep", "wait", "close", "open", "link", "merge", "notify"} {
+	for _, n := range []string{"show", "search", "grep", "wait", "park", "close", "open", "link", "merge", "notify"} {
 		if byName[n] == nil {
 			t.Errorf("tool %s missing", n)
 		}
@@ -103,11 +103,11 @@ func TestMCPListsScopedTools(t *testing.T) {
 	props := func(n string) map[string]any {
 		return byName[n]["inputSchema"].(map[string]any)["properties"].(map[string]any)
 	}
-	if _, ok := props("close")["id"]; ok {
-		t.Fatal("close must not take an id: it acts on this dossier")
+	if _, ok := props("close")["id"]; !ok {
+		t.Fatal("close must take an optional id")
 	}
-	if _, ok := props("peek")["id"]; !ok {
-		t.Fatal("peek must take an id")
+	if req, _ := byName["close"]["inputSchema"].(map[string]any)["required"].([]any); len(req) > 0 {
+		t.Fatalf("close requires %v: its id defaults to this dossier", req)
 	}
 	if _, ok := props("open")["parent"]; ok {
 		t.Fatal("open must not expose parent")
@@ -117,7 +117,7 @@ func TestMCPListsScopedTools(t *testing.T) {
 	}
 }
 
-func TestMCPToolsActOnTheCurrentDossierOnly(t *testing.T) {
+func TestMCPToolsDefaultToTheCurrentDossier(t *testing.T) {
 	a := storeWith(t, "Séance", "Armoire", "Autre")
 	c := startMCP(t)
 	c.rpc(t, "initialize", map[string]any{})
@@ -134,8 +134,11 @@ func TestMCPToolsActOnTheCurrentDossierOnly(t *testing.T) {
 	if env, isErr := c.call(t, "link", map[string]any{"to": "D-0002", "rel": "includes"}); isErr {
 		t.Fatalf("link %v", env)
 	}
-	if env, isErr := c.call(t, "notify", map[string]any{"to": "D-0003", "text": "x"}); !isErr || !strings.Contains(env["error"].(map[string]any)["message"].(string), "does not include") {
-		t.Fatalf("notify outside includes: %v", env)
+	if env, isErr := c.call(t, "notify", map[string]any{"to": "D-0003", "text": "x"}); isErr {
+		t.Fatalf("notify a dossier this one does not include: %v", env)
+	}
+	if log, _ := os.ReadFile(mustLoad(t, a, "3").Path("log.md")); !strings.Contains(string(log), "· by D-0001") {
+		t.Fatalf("an action on another dossier is not signed:\n%s", log)
 	}
 	if env, isErr := c.call(t, "notify", map[string]any{"to": "D-0002", "text": "Décidé : on attend."}); isErr {
 		t.Fatalf("notify %v", env)
@@ -144,14 +147,14 @@ func TestMCPToolsActOnTheCurrentDossierOnly(t *testing.T) {
 	if !strings.Contains(string(log), "from D-0001: Décidé : on attend.") {
 		t.Fatalf("notify not logged:\n%s", log)
 	}
-	if env, isErr := c.call(t, "grep", map[string]any{"pattern": "x", "dossier": "D-0002"}); !isErr || !strings.Contains(env["error"].(map[string]any)["message"].(string), "neither") {
-		t.Fatalf("grep outside scope: %v", env)
+	if env, isErr := c.call(t, "grep", map[string]any{"pattern": "x", "dossier": "D-0002"}); isErr {
+		t.Fatalf("grep another dossier: %v", env)
 	}
 	if _, isErr := c.call(t, "grep", map[string]any{"pattern": "x"}); isErr {
 		t.Fatal("grep on this dossier refused")
 	}
-	if env, isErr := c.call(t, "peek", map[string]any{"id": "D-0003"}); isErr || env["result"].(map[string]any)["title"] != "Autre" {
-		t.Fatalf("peek %v", env)
+	if env, isErr := c.call(t, "show", map[string]any{"id": "D-0003"}); isErr || env["result"].(map[string]any)["title"] != "Autre" {
+		t.Fatalf("show another dossier %v", env)
 	}
 	if env, isErr := c.call(t, "open", map[string]any{"title": "Sous-affaire", "no-start": true}); isErr {
 		t.Fatalf("open %v", env)
@@ -204,7 +207,7 @@ func TestEveryActionHasExamplesAndSummary(t *testing.T) {
 	}
 }
 
-func TestMCPLinksFromThisDossierOrOneItIncludes(t *testing.T) {
+func TestMCPLinksFromAnyDossier(t *testing.T) {
 	a := storeWith(t, "Limite de connexions", "Autre", "Accord")
 	c := startMCP(t)
 	c.rpc(t, "initialize", map[string]any{})
@@ -221,9 +224,8 @@ func TestMCPLinksFromThisDossierOrOneItIncludes(t *testing.T) {
 	if env, isErr := c.call(t, "link", map[string]any{"to": "D-0003", "rel": "depends_on"}); isErr {
 		t.Fatalf("link from self: %v", env)
 	}
-	env, isErr := c.call(t, "link", map[string]any{"from": "D-0002", "to": "D-0003", "rel": "includes"})
-	if !isErr || !strings.Contains(env["error"].(map[string]any)["message"].(string), "neither") {
-		t.Fatalf("link from a foreign dossier: %v", env)
+	if env, isErr := c.call(t, "link", map[string]any{"from": "D-0002", "to": "D-0003", "rel": "includes"}); isErr {
+		t.Fatalf("link from any dossier of the store: %v", env)
 	}
 }
 
@@ -254,7 +256,7 @@ func TestMCPWaitUsesTheDefaultDelayAndNotifyWakes(t *testing.T) {
 	}
 }
 
-func TestMCPWaitsAndResumesADossierItIncludes(t *testing.T) {
+func TestMCPWaitsAndResumesAnotherDossier(t *testing.T) {
 	a := storeWith(t, "Séance PSEC", "Audit des accès S3", "Autre")
 	a.Link("1", "2", "includes")
 	c := startMCP(t)
@@ -275,7 +277,7 @@ func TestMCPWaitsAndResumesADossierItIncludes(t *testing.T) {
 	if env, isErr := c.call(t, "resume", map[string]any{"id": "D-0002"}); isErr {
 		t.Fatalf("resume an included dossier: %v", env)
 	}
-	if env, isErr := c.call(t, "wait", map[string]any{"id": "D-0003", "on": "X"}); !isErr || !strings.Contains(env["error"].(map[string]any)["message"].(string), "neither") {
-		t.Fatalf("wait on a foreign dossier: %v", env)
+	if env, isErr := c.call(t, "wait", map[string]any{"id": "D-0003", "on": "X"}); isErr {
+		t.Fatalf("wait on any dossier of the store: %v", env)
 	}
 }

@@ -9,84 +9,37 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/aclemen1/dossier-cli/internal/app"
-	"github.com/aclemen1/dossier-cli/internal/dossier"
 	"github.com/aclemen1/dossier-cli/internal/spec"
 )
 
-// tool projects an action onto an MCP tool scoped to the current dossier.
+// tool projects an action onto an MCP tool. Its dossier parameters default
+// to the session's own dossier; any dossier of the store can be named instead.
 type tool struct {
 	name, action, description string
-	self                      []string          // params set to DOSSIER_ID
+	self                      []string          // params that default to DOSSIER_ID
 	rename                    map[string]string // action param → tool param
 	hide                      []string
-	check                     func(a *app.App, self string, args map[string]any) error
 }
 
 var tools = []tool{
-	{name: "show", action: "show", self: []string{"id"}, description: "Show this dossier: state, sources, files, links, history, and the body of its fiche (instruction, notes, sections such as « À ne pas oublier »)."},
-	{name: "peek", action: "show", description: "Read another dossier of the store, read-only."},
+	{name: "show", action: "show", self: []string{"id"}, description: "Show a dossier: state, sources, files, links, history, and the body of its fiche (instruction, notes, sections such as « À ne pas oublier »)."},
 	{name: "search", action: "search", description: "Search every dossier of the store, open or closed."},
-	{name: "grep", action: "grep", rename: map[string]string{"id": "dossier"},
-		description: "Search the full conversation of this dossier, or of a dossier merged into it.",
-		check:       grepScope},
-	{name: "tree", action: "tree", self: []string{"id"}, description: "Walk this dossier's links: points it includes, what blocks them."},
-	{name: "wait", action: "wait", description: "Mark this dossier, or one it includes, as waiting on someone outside; again on a waiting dossier, it corrects whom it waits on and until when. id defaults to this dossier.",
-		check: selfOrIncluded("id")},
-	{name: "resume", action: "resume", hide: []string{"prompt"}, description: "Bring this waiting dossier, or a waiting one it includes, back to open. id defaults to this dossier.",
-		check: selfOrIncluded("id")},
-	{name: "park", action: "park", description: "Mark this dossier, or one it includes, as needing no action from the user for now, e.g. an item to raise at the next meeting. Anything new on it clears the mark. id defaults to this dossier.",
-		check: selfOrIncluded("id")},
-	{name: "unpark", action: "unpark", description: "Mark this dossier, or one it includes, as needing action from the user again. id defaults to this dossier.",
-		check: selfOrIncluded("id")},
-	{name: "close", action: "close", self: []string{"id"}, description: "Close this dossier once the user says it is settled."},
+	{name: "grep", action: "grep", self: []string{"id"}, rename: map[string]string{"id": "dossier"},
+		description: "Search the full conversation of a dossier, including the dossiers merged into it."},
+	{name: "tree", action: "tree", self: []string{"id"}, description: "Walk a dossier's links: what it includes, what blocks it."},
+	{name: "wait", action: "wait", self: []string{"id"}, description: "Mark a dossier as waiting on someone outside; again on a waiting dossier, it corrects whom it waits on and until when."},
+	{name: "resume", action: "resume", self: []string{"id"}, hide: []string{"prompt"}, description: "Bring a waiting dossier back to open."},
+	{name: "park", action: "park", self: []string{"id"}, description: "Mark a dossier as needing no action from the user for now, e.g. an item to raise at the next meeting. Anything new on it clears the mark."},
+	{name: "unpark", action: "unpark", self: []string{"id"}, description: "Mark a dossier as needing action from the user again."},
+	{name: "close", action: "close", self: []string{"id"}, description: "Close a dossier once the user says it is settled."},
 	{name: "open", action: "open", self: []string{"in"}, hide: []string{"source", "thread", "url"},
-		description: "Open a new dossier that this one includes, e.g. an item of this meeting or a side affair that grows out of this one."},
-	{name: "link", action: "link", description: "Link this dossier, or one it includes, to another: includes (part of it) or depends_on (waits for). from defaults to this dossier.",
-		check: selfOrIncluded("from")},
-	{name: "unlink", action: "unlink", description: "Remove links from this dossier, or one it includes, to another. from defaults to this dossier.",
-		check: selfOrIncluded("from")},
+		description: "Open a new dossier. By default this dossier includes it (an item of this meeting, a side affair); pass in = [] for a dossier on its own, or other dossiers that include it."},
+	{name: "link", action: "link", self: []string{"from"}, description: "Link a dossier to another: includes (part of it) or depends_on (waits for)."},
+	{name: "unlink", action: "unlink", self: []string{"from"}, description: "Remove links from a dossier to another."},
 	{name: "track", action: "track", self: []string{"id"},
-		description: "Attach a thread to this dossier as a source, e.g. the thread of a draft you just wrote: its replies come back here, and its star follows the dossier's state."},
-	{name: "merge", action: "merge", self: []string{"from"}, description: "Merge this dossier into another one, after the user agreed."},
-	{name: "notify", action: "notify", self: []string{"from"}, description: "Tell a dossier that this one includes what was decided."},
-}
-
-// selfOrIncluded lets a session act, through param, on its own dossier (the
-// default) or on a dossier its dossier includes.
-func selfOrIncluded(param string) func(*app.App, string, map[string]any) error {
-	return func(a *app.App, self string, args map[string]any) error {
-		target, _ := args[param].(string)
-		if target == "" {
-			args[param] = self
-			return nil
-		}
-		d, err := a.Load(target)
-		if err != nil {
-			return err
-		}
-		if d.ID == self || includes(a, self, d.ID) {
-			args[param] = d.ID
-			return nil
-		}
-		return spec.UserError("%s must be this dossier (%s) or a dossier it includes; %s is neither", param, self, d.ID)
-	}
-}
-
-func grepScope(a *app.App, self string, args map[string]any) error {
-	target, _ := args["id"].(string)
-	if target == "" {
-		args["id"] = self
-		return nil
-	}
-	d, err := a.Load(target)
-	if err != nil {
-		return err
-	}
-	if d.ID == self || d.MergedInto == self {
-		return nil
-	}
-	return spec.UserError("grep reads this dossier (%s) or a dossier merged into it; %s is neither. Use search to look across dossiers", self, d.ID)
+		description: "Attach a thread to a dossier as a source, e.g. the thread of a draft you just wrote: its replies come back there, and its star follows the dossier's state."},
+	{name: "merge", action: "merge", self: []string{"from"}, description: "Merge a dossier into another one, after the user agreed."},
+	{name: "notify", action: "notify", self: []string{"from"}, description: "Tell another dossier something: a decision, new information, a request. Its session gets it as a prompt."},
 }
 
 func contains(l []string, s string) bool {
@@ -103,14 +56,18 @@ func (t tool) schema() map[string]any {
 	props := map[string]any{}
 	var required []string
 	for _, p := range a.Params {
-		if contains(t.self, p.Name) || contains(t.hide, p.Name) {
+		if contains(t.hide, p.Name) {
 			continue
 		}
 		name := p.Name
 		if r, ok := t.rename[p.Name]; ok {
 			name = r
 		}
-		prop := map[string]any{"description": p.Help}
+		help := p.Help
+		if contains(t.self, p.Name) {
+			help = strings.TrimSuffix(strings.TrimSuffix(help, " Defaults to DOSSIER_ID."), ".") + ". Defaults to this session's dossier."
+		}
+		prop := map[string]any{"description": help}
 		switch p.Kind {
 		case spec.Bool:
 			prop["type"] = "boolean"
@@ -127,7 +84,7 @@ func (t tool) schema() map[string]any {
 			prop["default"] = p.Default
 		}
 		props[name] = prop
-		if p.Required && !(t.check != nil && (p.Name == "id" || p.Name == "from")) {
+		if p.Required && !contains(t.self, p.Name) {
 			required = append(required, name)
 		}
 	}
@@ -149,21 +106,11 @@ func (t tool) call(self string, in map[string]any) (any, error) {
 				k = from
 			}
 		}
-		if contains(t.self, k) {
-			continue
-		}
 		args[k] = v
 	}
 	for _, p := range t.self {
-		args[p] = self
-	}
-	if t.check != nil {
-		ap, err := app.New(os.Getenv("DOSSIER_STORE"))
-		if err != nil {
-			return nil, err
-		}
-		if err := t.check(ap, self, args); err != nil {
-			return nil, err
+		if v, ok := args[p]; !ok || v == "" {
+			args[p] = self
 		}
 	}
 	var argv []string
@@ -240,8 +187,8 @@ func runInstalled(action string, argv []string) (any, error) {
 	return result, nil
 }
 
-const mcpInstructions = "Tools of the dossier this session works on. They act on this dossier only, " +
-	"except search and peek, which read the whole store. Close or merge only after the user said so."
+const mcpInstructions = "Tools of the dossier store. They act on this session's dossier by default, and on any " +
+	"dossier of the store when you name it. Close or merge only after the user said so."
 
 // serveMCP speaks MCP over stdio, one JSON-RPC message per line.
 func serveMCP(in io.Reader, out io.Writer) error {
@@ -344,9 +291,4 @@ func toolNames() string {
 		n = append(n, t.name)
 	}
 	return strings.Join(n, ", ")
-}
-
-func includes(a *app.App, self, id string) bool {
-	d, err := a.Load(self)
-	return err == nil && d.HasLink(dossier.RelIncludes, id)
 }

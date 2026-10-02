@@ -288,7 +288,12 @@ func (d *Dossier) Log(format string, a ...any) error {
 		return err
 	}
 	defer f.Close()
-	_, err = fmt.Fprintf(f, "- %s · %s\n", Now(), fmt.Sprintf(format, a...))
+	line := fmt.Sprintf(format, a...)
+	// A session acting on another dossier signs what it did there.
+	if actor := os.Getenv("DOSSIER_ID"); actor != "" && actor != d.ID {
+		line += " · by " + actor
+	}
+	_, err = fmt.Fprintf(f, "- %s · %s\n", Now(), line)
 	return err
 }
 

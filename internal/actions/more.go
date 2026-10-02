@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/aclemen1/dossier-cli/internal/app"
-	"github.com/aclemen1/dossier-cli/internal/dossier"
 	"github.com/aclemen1/dossier-cli/internal/spec"
 	"github.com/aclemen1/dossier-cli/internal/store"
 )
@@ -66,11 +65,11 @@ func init() {
 	})
 
 	spec.Register(&spec.Action{
-		Category: "graph", Name: "notify", Summary: "Send an event to a dossier that <from> includes, e.g. what a meeting decided.",
-		Discussion: "Only along an includes link: a dossier tells each dossier it includes what was decided, e.g. a meeting its items.",
+		Category: "graph", Name: "notify", Summary: "Send an event from one dossier to another: a decision, new information, a request.",
+		Discussion: "Any two dossiers of the store, e.g. a meeting tells an item what was decided, or an item asks its meeting to add a point.",
 		Params: []spec.Param{
-			{Name: "from", Kind: spec.String, Positional: true, Required: true, Help: "Dossier that includes <to>."},
-			{Name: "to", Kind: spec.String, Positional: true, Required: true, Help: "Included dossier."},
+			{Name: "from", Kind: spec.String, Positional: true, Required: true, Help: "Dossier the event comes from."},
+			{Name: "to", Kind: spec.String, Positional: true, Required: true, Help: "Dossier that must know."},
 			{Name: "text", Kind: spec.String, Required: true, Help: "What <to> must know."},
 		},
 		Effects:  []string{"Logs the event in <to> and prompts its session; a dossier without session only gets the log line."},
@@ -85,8 +84,8 @@ func init() {
 				if err != nil {
 					return nil, err
 				}
-				if !from.HasLink(dossier.RelIncludes, to.ID) {
-					return nil, spec.UserError("%s does not include %s: notify only follows includes links. Add one with `dossier link %s %s --rel includes`", from.ID, to.ID, from.ID, to.ID)
+				if from.ID == to.ID {
+					return nil, spec.UserError("%s cannot notify itself", from.ID)
 				}
 				text := fmt.Sprintf("From dossier %s (%s): %s", from.ID, from.Title, ctx.Str("text"))
 				_ = to.Log("from %s: %s", from.ID, ctx.Str("text"))
