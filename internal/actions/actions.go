@@ -224,9 +224,8 @@ func init() {
 			{Name: "thread", Kind: spec.String, Help: "Thread reference <name>:<ref>, used to attach later events."},
 			{Name: "url", Kind: spec.String, Help: "Link to the original item."},
 			{Name: "file", Kind: spec.StringList, Help: "File copied into context/ (repeatable)."},
-			{Name: "parent", Kind: spec.String, Help: "Parent dossier id. A meeting is not the parent of its points: use --agenda."},
 			{Name: "alias", Kind: spec.String, Help: "Name for a lasting dossier, e.g. RDIR for a recurring meeting."},
-			{Name: "agenda", Kind: spec.StringList, Help: "Meeting dossier (alias or id) that includes this one (repeatable)."},
+			{Name: "agenda", Kind: spec.StringList, Help: "Dossier (alias or id) that includes this one, e.g. a meeting (repeatable)."},
 			{Name: "no-start", Kind: spec.Bool, Help: "Create the dossier without starting its session."},
 		},
 		Effects: []string{
@@ -236,7 +235,7 @@ func init() {
 		Examples: []string{
 			`dossier open --title "Armoire de pharmacie" --instruction "Demander une date de passage"`,
 			`dossier open --title "Devis toiture" --file ~/Downloads/devis.pdf --no-start`,
-			`dossier open --title "Relance gérance" --parent D-0042`,
+			`dossier open --title "Relance gérance" --agenda D-0042`,
 		},
 		Run: func(ctx *spec.Context) (any, error) {
 			return withApp(ctx, true, func(a *app.App) (any, error) {
@@ -257,7 +256,7 @@ func init() {
 					files = append(files, connector.File{Name: p, Path: p})
 				}
 				return a.Open(app.OpenParams{Title: ctx.Str("title"), Instruction: instr, SourceRef: ctx.Str("source"),
-					ThreadRef: ctx.Str("thread"), URL: ctx.Str("url"), Files: files, Parent: ctx.Str("parent"), NoStart: ctx.Bool("no-start"),
+					ThreadRef: ctx.Str("thread"), URL: ctx.Str("url"), Files: files, NoStart: ctx.Bool("no-start"),
 					Alias: ctx.Str("alias"), Agenda: ctx.List("agenda")})
 			})
 		},
@@ -275,11 +274,11 @@ func init() {
 		Category: "dossier", Name: "ls", Summary: "List dossiers with their state and what their agent is doing.",
 		Params: []spec.Param{
 			{Name: "status", Kind: spec.String, Default: "active", Enum: []string{"active", "open", "waiting", "done", "merged", "all"}, Help: "active = open and waiting."},
-			{Name: "parent", Kind: spec.String, Help: "Only children of this dossier."},
+			{Name: "in", Kind: spec.String, Help: "Only the dossiers this one includes."},
 		},
 		Examples: []string{"dossier ls", "dossier ls --status waiting", "dossier ls --status all --format text"},
 		Run: func(ctx *spec.Context) (any, error) {
-			return withApp(ctx, false, func(a *app.App) (any, error) { return a.List(ctx.Str("status"), ctx.Str("parent")) })
+			return withApp(ctx, false, func(a *app.App) (any, error) { return a.List(ctx.Str("status"), ctx.Str("in")) })
 		},
 		Text: func(w io.Writer, r any) {
 			rows := r.([]app.Row)

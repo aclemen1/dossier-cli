@@ -34,21 +34,21 @@ var tools = []tool{
 	{name: "wait", action: "wait", self: []string{"id"}, description: "Mark this dossier as waiting on someone outside."},
 	{name: "resume", action: "resume", self: []string{"id"}, hide: []string{"prompt"}, description: "Bring this waiting dossier back to open."},
 	{name: "close", action: "close", self: []string{"id"}, description: "Close this dossier once the user says it is settled."},
-	{name: "open", action: "open", self: []string{"parent"}, hide: []string{"source", "thread", "url"},
-		description: "Open a new dossier that grows out of this one (it records this dossier as parent). For an agenda item of this meeting, pass agenda = this dossier instead: the meeting then includes it and is not its parent."},
-	{name: "link", action: "link", description: "Link this dossier, or one it opened, to another: includes (agenda item) or depends_on (waits for). from defaults to this dossier.",
-		check: fromSelfOrChild},
-	{name: "unlink", action: "unlink", description: "Remove links from this dossier, or one it opened, to another. from defaults to this dossier.",
-		check: fromSelfOrChild},
+	{name: "open", action: "open", self: []string{"agenda"}, hide: []string{"source", "thread", "url"},
+		description: "Open a new dossier that this one includes, e.g. an agenda item of this meeting or a side affair that grows out of this one."},
+	{name: "link", action: "link", description: "Link this dossier, or one it includes, to another: includes (agenda item) or depends_on (waits for). from defaults to this dossier.",
+		check: fromSelfOrIncluded},
+	{name: "unlink", action: "unlink", description: "Remove links from this dossier, or one it includes, to another. from defaults to this dossier.",
+		check: fromSelfOrIncluded},
 	{name: "track", action: "track", self: []string{"id"},
 		description: "Attach a thread to this dossier as a source, e.g. the thread of a draft you just wrote: its replies come back here, and its star follows the dossier's state."},
 	{name: "merge", action: "merge", self: []string{"from"}, description: "Merge this dossier into another one, after the user agreed."},
 	{name: "notify", action: "notify", self: []string{"from"}, description: "Tell a dossier that this one includes what was decided."},
 }
 
-// fromSelfOrChild lets a session link from its own dossier, from a dossier it
-// opened (parent = this dossier) or from a point its dossier includes.
-func fromSelfOrChild(a *app.App, self string, args map[string]any) error {
+// fromSelfOrIncluded lets a session link from its own dossier or from a
+// dossier its dossier includes.
+func fromSelfOrIncluded(a *app.App, self string, args map[string]any) error {
 	from, _ := args["from"].(string)
 	if from == "" {
 		args["from"] = self
@@ -58,11 +58,11 @@ func fromSelfOrChild(a *app.App, self string, args map[string]any) error {
 	if err != nil {
 		return err
 	}
-	if d.ID == self || d.Parent == self || includes(a, self, d.ID) {
+	if d.ID == self || includes(a, self, d.ID) {
 		args["from"] = d.ID
 		return nil
 	}
-	return spec.UserError("links start from this dossier (%s), from a dossier it opened or from a point it includes; %s is none of these", self, d.ID)
+	return spec.UserError("links start from this dossier (%s) or from a dossier it includes; %s is neither", self, d.ID)
 }
 
 func grepScope(a *app.App, self string, args map[string]any) error {

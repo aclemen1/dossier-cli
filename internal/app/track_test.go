@@ -4,8 +4,6 @@ import (
 	"os"
 	"strings"
 	"testing"
-
-	"github.com/aclemen1/dossier-cli/internal/dossier"
 )
 
 func TestTrackAttachesAThreadThatTransitionsFollow(t *testing.T) {
@@ -96,26 +94,5 @@ func TestDisabledPluginsReachTheAgentSettings(t *testing.T) {
 	b, _ := os.ReadFile(p)
 	if !strings.Contains(string(b), `"playwright@claude-plugins-official": false`) {
 		t.Fatalf("settings %s", b)
-	}
-}
-
-func TestAMeetingIncludesItsPointsAndIsNotTheirParent(t *testing.T) {
-	f := newFixture(t)
-	f.a.Open(OpenParams{Title: "Séance", Alias: "RDIR", NoStart: true})
-	r, err := f.a.Open(OpenParams{Title: "Point", Parent: "RDIR", Agenda: []string{"RDIR"}, NoStart: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	p, _ := f.a.Load(r.ID)
-	m, _ := f.a.Load("RDIR")
-	if p.Parent != "" || !m.HasLink(dossier.RelIncludes, p.ID) {
-		t.Fatalf("open with agenda: parent %q, includes %v", p.Parent, m.Links)
-	}
-	r, _ = f.a.Open(OpenParams{Title: "Autre point", Parent: m.ID, NoStart: true})
-	if _, err := f.a.Link(m.ID, r.ID, dossier.RelIncludes); err != nil {
-		t.Fatal(err)
-	}
-	if q, _ := f.a.Load(r.ID); q.Parent != "" {
-		t.Fatalf("link includes kept parent %q", q.Parent)
 	}
 }

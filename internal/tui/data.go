@@ -12,7 +12,7 @@ import (
 )
 
 // row is one line of the list: a store header or a dossier, indented under the
-// dossier that includes it or is its parent.
+// dossier that includes it.
 type row struct {
 	header   string
 	store    *storeView
@@ -20,7 +20,6 @@ type row struct {
 	activity string
 	depth    int
 	last     []bool // per ancestor level: was that ancestor the last child
-	rel      string
 	blocked  []string
 	cycle    bool // already shown above on this branch
 }
@@ -98,8 +97,8 @@ func load(roots []string, all bool, filter string) ([]row, []string) {
 }
 
 // treeRows lays the shown dossiers out as a forest: a dossier appears under
-// each shown dossier that includes it or is its parent, and at the top level
-// only when no shown dossier holds it.
+// each shown dossier that includes it, and at the top level only when no shown
+// dossier includes it.
 func treeRows(sv *storeView, ds []*dossier.Dossier, live map[string]string, all bool, filter string) []row {
 	visible := map[string]bool{}
 	for _, d := range ds {
@@ -108,25 +107,16 @@ func treeRows(sv *storeView, ds []*dossier.Dossier, live map[string]string, all 
 		}
 	}
 	children := map[string][]string{}
-	rels := map[[2]string]string{}
+	pair := map[[2]string]bool{}
 	held := map[string]bool{}
-	addChild := func(parent, child, rel string) {
-		if !visible[parent] || !visible[child] || parent == child {
-			return
-		}
-		if _, dup := rels[[2]string{parent, child}]; dup {
-			return
-		}
-		children[parent] = append(children[parent], child)
-		rels[[2]string{parent, child}] = rel
-		held[child] = true
-	}
 	for _, d := range ds {
 		for _, id := range d.Targets(dossier.RelIncludes) {
-			addChild(d.ID, id, "includes")
-		}
-		if d.Parent != "" {
-			addChild(d.Parent, d.ID, "child")
+			if !visible[d.ID] || !visible[id] || d.ID == id || pair[[2]string{d.ID, id}] {
+				continue
+			}
+			pair[[2]string{d.ID, id}] = true
+			children[d.ID] = append(children[d.ID], id)
+			held[id] = true
 		}
 	}
 	order := func(ids []string) {
@@ -141,11 +131,11 @@ func treeRows(sv *storeView, ds []*dossier.Dossier, live map[string]string, all 
 	order(roots)
 	idx := sv.byID
 	var out []row
-	var walk func(id string, depth int, last []bool, rel string, path map[string]bool)
-	walk = func(id string, depth int, last []bool, rel string, path map[string]bool) {
+	var walk func(id string, depth int, last []bool, path map[string]bool)
+	walk = func(id string, depth int, last []bool, path map[string]bool) {
 		d := idx[id]
 		out = append(out, row{store: sv, d: d, activity: app.Activity(d, live), depth: depth,
-			last: append([]bool{}, last...), rel: rel, blocked: app.BlockedBy(d, idx), cycle: path[id]})
+			last: append([]bool{}, last...), blocked: app.BlockedBy(d, idx), cycle: path[id]})
 		if path[id] {
 			return
 		}
@@ -153,12 +143,12 @@ func treeRows(sv *storeView, ds []*dossier.Dossier, live map[string]string, all 
 		kids := append([]string{}, children[id]...)
 		order(kids)
 		for i, k := range kids {
-			walk(k, depth+1, append(last, i == len(kids)-1), rels[[2]string{id, k}], path)
+			walk(k, depth+1, append(last, i == len(kids)-1), path)
 		}
 		delete(path, id)
 	}
 	for _, id := range roots {
-		walk(id, 0, nil, "", map[string]bool{})
+		walk(id, 0, nil, map[string]bool{})
 	}
 	// A cycle of links leaves dossiers that no root reaches: start from them too.
 	for {
@@ -176,7 +166,7 @@ func treeRows(sv *storeView, ds []*dossier.Dossier, live map[string]string, all 
 			break
 		}
 		order(rest)
-		walk(rest[0], 0, nil, "", map[string]bool{})
+		walk(rest[0], 0, nil, map[string]bool{})
 	}
 	return out
 }
@@ -230,8 +220,8 @@ type linked struct {
 }
 
 var (
-	outName = map[string]string{"includes": "includes", "depends_on": "depends on", "parent": "child of", "merged_into": "merged into"}
-	inName  = map[string]string{"includes": "included by", "depends_on": "needed by", "parent": "parent of", "merged_into": "merged from"}
+	outName = map[string]string{"includes": "includes", "depends_on": "depends on", "merged_into": "merged into"}
+	inName  = map[string]string{"includes": "included by", "depends_on": "needed by", "merged_into": "merged from"}
 )
 
 func links(sv *storeView, d *dossier.Dossier) []linked {

@@ -83,14 +83,6 @@ func (a *App) Link(fromID, toID, rel string) (LinkResult, error) {
 		return LinkResult{}, err
 	}
 	_ = from.Log("link %s %s (%s)", rel, to.ID, to.Title)
-	if rel == dossier.RelIncludes && to.Parent == from.ID {
-		// One relation per pair: the meeting includes the point, so it stops being its parent.
-		to.Parent = ""
-		if err := to.Save(); err != nil {
-			return LinkResult{}, err
-		}
-		_ = to.Log("parent %s dropped: %s includes it", from.ID, from.ID)
-	}
 	return LinkResult{From: from.ID, Rel: rel, To: to.ID, Links: from.Links}, nil
 }
 
@@ -178,7 +170,7 @@ type Edge struct {
 	State string `json:"state"`
 }
 
-// Incoming lists the links that point at d, including parent and merge edges.
+// Incoming lists the links that point at d, including merge edges.
 func (a *App) Incoming(d *dossier.Dossier) []Edge {
 	var out []Edge
 	all, _ := a.All()
@@ -187,9 +179,6 @@ func (a *App) Incoming(d *dossier.Dossier) []Edge {
 			if l.To == d.ID {
 				out = append(out, Edge{Rel: l.Rel, ID: x.ID, Title: x.Title, State: x.State})
 			}
-		}
-		if x.Parent == d.ID {
-			out = append(out, Edge{Rel: "parent", ID: x.ID, Title: x.Title, State: x.State})
 		}
 		if x.MergedInto == d.ID {
 			out = append(out, Edge{Rel: "merged_into", ID: x.ID, Title: x.Title, State: x.State})
@@ -210,9 +199,6 @@ func (a *App) Outgoing(d *dossier.Dossier) []Edge {
 	}
 	for _, l := range d.Links {
 		add(l.Rel, l.To)
-	}
-	if d.Parent != "" {
-		add("parent", d.Parent)
 	}
 	if d.MergedInto != "" {
 		add("merged_into", d.MergedInto)

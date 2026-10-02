@@ -36,23 +36,27 @@ type Row struct {
 	WaitUntil string   `json:"wait_until,omitempty"`
 	Alias     string   `json:"alias,omitempty"`
 	Label     string   `json:"label"`
-	Parent    string   `json:"parent,omitempty"`
 	Updated   string   `json:"updated"`
 	Pending   int      `json:"pending_transitions,omitempty"`
 	BlockedBy []string `json:"blocked_by,omitempty"`
 }
 
-func (a *App) List(status, parent string) ([]Row, error) {
+// List lists dossiers by state; with in, only the dossiers that one includes.
+func (a *App) List(status, in string) ([]Row, error) {
 	all, err := a.All()
 	if err != nil {
 		return nil, err
 	}
-	if parent != "" {
-		p, err := a.Load(parent)
+	var within map[string]bool
+	if in != "" {
+		holder, err := a.Load(in)
 		if err != nil {
 			return nil, err
 		}
-		parent = p.ID
+		within = map[string]bool{}
+		for _, id := range holder.Targets(dossier.RelIncludes) {
+			within[id] = true
+		}
 	}
 	panesNow := Panes()
 	idx := map[string]*dossier.Dossier{}
@@ -72,11 +76,11 @@ func (a *App) List(status, parent string) ([]Row, error) {
 				continue
 			}
 		}
-		if parent != "" && d.Parent != parent {
+		if within != nil && !within[d.ID] {
 			continue
 		}
 		rows = append(rows, Row{ID: d.ID, Title: d.Title, State: d.State, Activity: Activity(d, panesNow),
-			WaitingOn: d.WaitingOn, WaitUntil: d.WaitUntil, Alias: d.Alias, Label: d.Label(), Parent: d.Parent, Updated: d.Updated, Pending: len(d.Run.PendingTransitions), BlockedBy: BlockedBy(d, idx)})
+			WaitingOn: d.WaitingOn, WaitUntil: d.WaitUntil, Alias: d.Alias, Label: d.Label(), Updated: d.Updated, Pending: len(d.Run.PendingTransitions), BlockedBy: BlockedBy(d, idx)})
 	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i].ID < rows[j].ID })
 	return rows, nil
@@ -88,7 +92,6 @@ type ShowResult struct {
 	Session  string   `json:"session,omitempty"`
 	TabID    string   `json:"tab_id,omitempty"`
 	Files    []string `json:"files"`
-	Children []string `json:"children,omitempty"`
 	Body     string   `json:"body"`
 	Outgoing []Edge   `json:"outgoing"`
 	Incoming []Edge   `json:"incoming"`
@@ -101,12 +104,6 @@ func (a *App) Show(d *dossier.Dossier) ShowResult {
 		entries, _ := os.ReadDir(d.Path(sub))
 		for _, e := range entries {
 			r.Files = append(r.Files, filepath.Join(sub, e.Name()))
-		}
-	}
-	all, _ := a.All()
-	for _, x := range all {
-		if x.Parent == d.ID {
-			r.Children = append(r.Children, x.ID)
 		}
 	}
 	r.Outgoing, r.Incoming = a.Outgoing(d), a.Incoming(d)

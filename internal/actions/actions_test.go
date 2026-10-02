@@ -155,8 +155,8 @@ func TestMCPToolsActOnTheCurrentDossierOnly(t *testing.T) {
 	}
 	if env, isErr := c.call(t, "open", map[string]any{"title": "Sous-affaire", "no-start": true}); isErr {
 		t.Fatalf("open %v", env)
-	} else if child := mustLoad(t, a, "4"); child.Parent != "D-0001" {
-		t.Fatalf("child parent %q", child.Parent)
+	} else if self, _ := a.Load("1"); !self.HasLink("includes", "D-0004") {
+		t.Fatalf("this dossier should include the one it opened: %v", self.Links)
 	}
 	if env, isErr := c.call(t, "wait", map[string]any{}); !isErr || !strings.Contains(env["error"].(map[string]any)["message"].(string), "--on") {
 		t.Fatalf("missing argument: %v", env)
@@ -169,12 +169,11 @@ func mustLoad(t *testing.T, a *app.App, id string) *dossierView {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &dossierView{d.Parent, d.Path}
+	return &dossierView{d.Path}
 }
 
 type dossierView struct {
-	Parent string
-	Path   func(...string) string
+	Path func(...string) string
 }
 
 func TestSkillInstall(t *testing.T) {
@@ -205,30 +204,26 @@ func TestEveryActionHasExamplesAndSummary(t *testing.T) {
 	}
 }
 
-func TestMCPLinksFromThisDossierOrOneItOpened(t *testing.T) {
+func TestMCPLinksFromThisDossierOrOneItIncludes(t *testing.T) {
 	a := storeWith(t, "Limite de connexions", "Autre", "Accord")
 	c := startMCP(t)
 	c.rpc(t, "initialize", map[string]any{})
 	if env, isErr := c.call(t, "open", map[string]any{"title": "Touch Base CI", "no-start": true}); isErr {
 		t.Fatalf("open %v", env)
 	}
-	if env, isErr := c.call(t, "link", map[string]any{"from": "D-0004", "to": "D-0001", "rel": "includes"}); isErr {
-		t.Fatalf("link from child: %v", env)
+	if env, isErr := c.call(t, "link", map[string]any{"from": "D-0004", "to": "D-0002", "rel": "includes"}); isErr {
+		t.Fatalf("link from a dossier this one includes: %v", env)
 	}
 	child, _ := a.Load("4")
-	if !child.HasLink("includes", "D-0001") {
+	if !child.HasLink("includes", "D-0002") {
 		t.Fatalf("child links %v", child.Links)
 	}
 	if env, isErr := c.call(t, "link", map[string]any{"to": "D-0003", "rel": "depends_on"}); isErr {
 		t.Fatalf("link from self: %v", env)
 	}
 	env, isErr := c.call(t, "link", map[string]any{"from": "D-0002", "to": "D-0003", "rel": "includes"})
-	if !isErr || !strings.Contains(env["error"].(map[string]any)["message"].(string), "none of these") {
+	if !isErr || !strings.Contains(env["error"].(map[string]any)["message"].(string), "neither") {
 		t.Fatalf("link from a foreign dossier: %v", env)
-	}
-	a.Link("1", "2", "includes")
-	if env, isErr := c.call(t, "link", map[string]any{"from": "D-0002", "to": "D-0003", "rel": "depends_on"}); isErr {
-		t.Fatalf("link from a point this dossier includes: %v", env)
 	}
 }
 

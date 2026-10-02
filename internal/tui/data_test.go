@@ -25,9 +25,10 @@ func TestTreeNestsIncludedDossiersAndSurvivesCycles(t *testing.T) {
 	}
 	a.Link("1", "2", dossier.RelIncludes)
 	a.Link("1", "3", dossier.RelIncludes)
-	seance, _ := a.Load("1")
-	seance.Parent = "D-0003"
-	if err := seance.Save(); err != nil {
+	// link refuses a cycle; a hand-edited file can still hold one.
+	b, _ := a.Load("3")
+	b.Links = append(b.Links, dossier.Link{Rel: dossier.RelIncludes, To: "D-0001"})
+	if err := b.Save(); err != nil {
 		t.Fatal(err)
 	}
 	if got := Stores(root); len(got) != 1 {
@@ -66,16 +67,14 @@ func TestLinksGroupEveryRelationOfALinkedDossier(t *testing.T) {
 	a.Open(app.OpenParams{Title: "Séance", NoStart: true})
 	a.Open(app.OpenParams{Title: "Point", NoStart: true})
 	a.Link("1", "2", dossier.RelIncludes)
-	p, _ := a.Load("2")
-	p.Parent = "D-0001"
-	p.Save()
+	a.Link("1", "2", dossier.RelDependsOn)
 	rows, _ := load(Stores(root), false, "")
 	ls := links(rows[1].store, rows[1].d)
-	if len(ls) != 1 || ls[0].id != "D-0002" || strings.Join(ls[0].rels, ",") != "includes,parent of" {
+	if len(ls) != 1 || ls[0].id != "D-0002" || strings.Join(ls[0].rels, ",") != "includes,depends on" {
 		t.Fatalf("séance links %+v", ls)
 	}
 	ls = links(rows[2].store, rows[2].d)
-	if len(ls) != 1 || strings.Join(ls[0].rels, ",") != "child of,included by" {
+	if len(ls) != 1 || strings.Join(ls[0].rels, ",") != "included by,needed by" {
 		t.Fatalf("point links %+v", ls)
 	}
 }
