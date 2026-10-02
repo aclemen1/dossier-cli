@@ -4,10 +4,11 @@
 # ///
 """dossier source connector for Apple Reminders flags, through the macos CLI.
 
-A flagged, open reminder is a signal: its title is the dossier title, its notes
-the instruction. Tags split the spheres: a store takes the reminders that carry
+An open reminder that is flagged or has any priority is a signal: its title is
+the dossier title, its notes the instruction. Tags split the spheres: a store takes the reminders that carry
 `require_tag`, or the ones that do not carry `exclude_tag`. Closing the dossier
-completes the reminder and clears its flag; reopening it does the opposite.
+completes the reminder and clears its flag and priority; reopening it
+uncompletes it and sets the flag.
 
 Protocol 1: `reminders.py describe|poll|transition`, JSON on stdin and stdout.
 config: require_tag or exclude_tag (tag names without '#'), list (optional).
@@ -46,12 +47,16 @@ def belongs(item, cfg):
     return True
 
 
+def is_signal(item):
+    return bool(item.get("flagged")) or bool(item.get("priority"))
+
+
 def poll(inp):
     cfg = inp.get("config") or {}
     items, after = [], None
     while True:
-        args = ["reminders", "items", "list", "--has-flag", "--limit", "200",
-                "--fields", "id,title,notes,tags,list,createdAt,modifiedAt,completed,flagged"]
+        args = ["reminders", "items", "list", "--limit", "200",
+                "--fields", "id,title,notes,tags,list,createdAt,modifiedAt,completed,flagged,priority"]
         if cfg.get("list"):
             args += ["--list", cfg["list"]]
         if after:
@@ -64,7 +69,7 @@ def poll(inp):
         after = page.get("nextAfter")
     signals = []
     for it in items:
-        if it.get("completed") or not it.get("flagged") or not belongs(it, cfg):
+        if it.get("completed") or not is_signal(it) or not belongs(it, cfg):
             continue
         notes = (it.get("notes") or "").strip()
         title = it.get("title") or "Rappel"
@@ -93,8 +98,8 @@ def transition(inp):
     rid = ref.split("/", 1)[1]
     if to == "done":
         macos("reminders", "items", "complete", rid)
-        macos("reminders", "items", "update", rid, "--clear-flagged")
-        return {"ok": True, "detail": "reminder completed, flag cleared"}
+        macos("reminders", "items", "update", rid, "--clear-flagged", "--clear-priority")
+        return {"ok": True, "detail": "reminder completed, flag and priority cleared"}
     if frm == "done" and to == "open":
         macos("reminders", "items", "uncomplete", rid)
         macos("reminders", "items", "update", rid, "--flagged")
