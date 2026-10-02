@@ -149,6 +149,13 @@ func (a *App) agentSettings() (string, error) {
 		}
 	}
 	settings["permissions"] = map[string]any{"allow": []string{"mcp__dossier"}, "deny": deny}
+	if off := a.S.Config.Agent.DisablePlugins; len(off) > 0 {
+		plugins := map[string]bool{}
+		for _, p := range off {
+			plugins[p] = false
+		}
+		settings["enabledPlugins"] = plugins
+	}
 	p := a.S.Meta("run", "agent-settings.json")
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		return "", err

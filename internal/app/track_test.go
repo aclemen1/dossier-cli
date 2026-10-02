@@ -1,6 +1,7 @@
 package app
 
 import (
+	"os"
 	"strings"
 	"testing"
 )
@@ -54,5 +55,44 @@ func TestRestartClosesAndResumesTheSameSession(t *testing.T) {
 	ld, _ := f.a.Load(light.ID)
 	if err := f.a.Restart(ld); err == nil || !strings.Contains(err.Error(), "dossier attach") {
 		t.Fatalf("restart without session: %v", err)
+	}
+}
+
+func TestReconcileResumesOpenDossiersUpToTheCap(t *testing.T) {
+	f := newFixture(t)
+	f.a.Open(OpenParams{Title: "A"})
+	f.a.Open(OpenParams{Title: "B"})
+	f.a.Open(OpenParams{Title: "C"})
+	f.a.Open(OpenParams{Title: "Sans session", NoStart: true})
+	c, _ := f.a.Load("3")
+	f.a.SetState(c, "wait", "", "Livit")
+	f.a.S.Config.Lifecycle.MaxSessions = 1
+	before := len(f.calls("session/load"))
+	rep := f.a.Reconcile(nil)
+	if len(rep.Opened) != 1 || rep.Opened[0].Outcome != "resumed" || len(rep.Skipped) != 1 || !strings.Contains(rep.Skipped[0], "max_sessions") {
+		t.Fatalf("cap 1: %+v", rep)
+	}
+	if got := len(f.calls("session/load")) - before; got != 1 {
+		t.Fatalf("%d session/load, want 1", got)
+	}
+	f.a.S.Config.Lifecycle.MaxSessions = 0
+	if rep := f.a.Reconcile(nil); len(rep.Opened) != 2 {
+		t.Fatalf("default cap: waiting and session-less dossiers stay as they are, got %+v", rep)
+	}
+	if s := f.a.Sessions(); s.Cap != 20 || len(s.Stopped) != 2 {
+		t.Fatalf("sessions %+v", s)
+	}
+}
+
+func TestDisabledPluginsReachTheAgentSettings(t *testing.T) {
+	f := newFixture(t)
+	f.a.S.Config.Agent.DisablePlugins = []string{"playwright@claude-plugins-official"}
+	p, err := f.a.AgentSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(p)
+	if !strings.Contains(string(b), `"playwright@claude-plugins-official": false`) {
+		t.Fatalf("settings %s", b)
 	}
 }

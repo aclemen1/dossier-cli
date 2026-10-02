@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -174,6 +175,12 @@ func (a *App) Doctor() DoctorReport {
 		pending += len(d.Run.PendingTransitions)
 	}
 	add("pending transitions", pending == 0, itoa(pending)+" pending; replay with `dossier retry`")
+	s := a.Sessions()
+	detail := fmt.Sprintf("%d running, cap %d", s.Running, s.Cap)
+	if len(s.Stopped) > 0 {
+		detail += "; open without a tab: " + strings.Join(s.Stopped, ", ") + " (the next ingest resumes them)"
+	}
+	add("sessions", true, detail)
 	return rep
 }
 

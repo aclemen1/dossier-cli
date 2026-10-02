@@ -37,6 +37,8 @@ type AgentSection struct {
 	Skills        []string            `toml:"skills"`
 	SkillCommands map[string][]string `toml:"skill_commands"`
 	Protect       []string            `toml:"protect"`
+	// Plugins turned off in every session, e.g. "playwright@claude-plugins-official".
+	DisablePlugins []string `toml:"disable_plugins"`
 }
 
 type PromptSection struct {
@@ -50,6 +52,17 @@ type PromptSection struct {
 type Lifecycle struct {
 	CloseTabOn  []string `toml:"close_tab_on"`
 	DefaultWait string   `toml:"default_wait"`
+	MaxSessions int      `toml:"max_sessions"`
+}
+
+const defaultMaxSessions = 20
+
+// SessionCap is the number of sessions ingest keeps running in tabs.
+func (c Config) SessionCap() int {
+	if c.Lifecycle.MaxSessions > 0 {
+		return c.Lifecycle.MaxSessions
+	}
+	return defaultMaxSessions
 }
 
 type Routing struct {

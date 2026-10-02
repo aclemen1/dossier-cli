@@ -564,25 +564,95 @@ func (a *App) Attach(d *dossier.Dossier) error {
 			return err
 		}
 	} else if !paneAlive(d.Run.PaneID) {
-		c, err := a.client(d)
-		if err != nil {
+		if err := a.resume(d); err != nil {
 			return err
 		}
-		pl, err := c.LoadSession(d.Run.Session)
-		c.Close()
-		if err != nil {
-			return err
-		}
-		d.Run.PaneID, d.Run.TabID = pl.PaneID, pl.TabID
-		if err := d.Save(); err != nil {
-			return err
-		}
-		renameTab(d.Run.TabID, TabLabel(d))
 	}
 	if d.Run.TabID != "" {
 		_ = exec.Command("herdr", "tab", "focus", d.Run.TabID).Run()
 	}
 	return nil
+}
+
+// resume loads the dossier's session into a new tab, without a prompt.
+func (a *App) resume(d *dossier.Dossier) error {
+	c, err := a.client(d)
+	if err != nil {
+		return err
+	}
+	pl, err := c.LoadSession(d.Run.Session)
+	c.Close()
+	if err != nil {
+		return err
+	}
+	d.Run.PaneID, d.Run.TabID = pl.PaneID, pl.TabID
+	if err := d.Save(); err != nil {
+		return err
+	}
+	renameTab(d.Run.TabID, TabLabel(d))
+	return nil
+}
+
+// SessionsReport counts the store's sessions running in a tab and names the
+// open dossiers whose session has none.
+type SessionsReport struct {
+	Running int      `json:"running"`
+	Cap     int      `json:"cap"`
+	Stopped []string `json:"stopped"`
+}
+
+// Sessions reports without changing anything. See Reconcile.
+func (a *App) Sessions() SessionsReport {
+	_, rep := a.sessions()
+	return rep
+}
+
+func (a *App) sessions() ([]*dossier.Dossier, SessionsReport) {
+	rep := SessionsReport{Cap: a.S.Config.SessionCap(), Stopped: []string{}}
+	all, _ := a.All()
+	live := panes()
+	var stopped []*dossier.Dossier
+	for _, d := range all {
+		if d.Run.Session == "" {
+			continue
+		}
+		if _, ok := live[d.Run.PaneID]; ok && d.Run.PaneID != "" {
+			rep.Running++
+		} else if d.State == dossier.Open {
+			stopped = append(stopped, d)
+		}
+	}
+	sort.SliceStable(stopped, func(i, j int) bool { return stopped[i].Updated > stopped[j].Updated })
+	for _, d := range stopped {
+		rep.Stopped = append(rep.Stopped, d.ID)
+	}
+	return stopped, rep
+}
+
+// Reconcile resumes, in a tab, every open dossier whose session lost its tab,
+// most recently updated first, while fewer than the cap run. Dossiers in
+// handled were just started or prompted: herdr may not list their pane yet.
+func (a *App) Reconcile(handled map[string]bool) IngestReport {
+	rep := IngestReport{Source: "sessions"}
+	stopped, s := a.sessions()
+	for _, d := range stopped {
+		if handled[d.ID] {
+			continue
+		}
+		if s.Running >= s.Cap {
+			rep.Skipped = append(rep.Skipped, fmt.Sprintf("%s has no tab: %d sessions already run (lifecycle.max_sessions)", d.ID, s.Running))
+			continue
+		}
+		rep.Events++
+		if err := a.resume(d); err != nil {
+			rep.Errors = append(rep.Errors, d.ID+": "+err.Error())
+			continue
+		}
+		s.Running++
+		_ = d.Log("session resumed in tab %s: the dossier is open", d.Run.TabID)
+		rep.Opened = append(rep.Opened, OpenResult{ID: d.ID, Dir: d.Dir, Outcome: "resumed", Session: d.Run.Session, TabID: d.Run.TabID})
+	}
+	return rep
 }
 
 func bodyInstruction(d *dossier.Dossier) string {

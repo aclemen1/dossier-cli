@@ -16,6 +16,8 @@ meta = { interaction = "native" }
 args = []
 # Adds --remote-control "<id> · <title>" so the session shows on your phone.
 remote_control = true
+# Plugins turned off in every session, e.g. a browser a dossier never needs.
+# disable_plugins = ["playwright@claude-plugins-official"]
 
 [prompt]
 open = "prompts/open.md"
@@ -27,6 +29,9 @@ default_instruction = "Prepare a proposal for the next step, then wait for my de
 close_tab_on = ["done"]
 # Wait before a waiting dossier wakes up and asks whether to chase.
 default_wait = "7d"
+# ingest resumes, in a tab, every open dossier whose session lost its tab, up
+# to this many sessions running at once.
+max_sessions = 20
 
 [routing]
 # An instruction starting with one of these, followed by a number, is routed

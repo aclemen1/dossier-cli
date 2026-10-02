@@ -448,6 +448,17 @@ func (a *App) Ingest(names []string, dryRun bool) ([]IngestReport, error) {
 		}
 		reports = append(reports, rep)
 	}
+	if !dryRun {
+		handled := map[string]bool{}
+		for _, r := range reports {
+			for _, o := range r.Opened {
+				handled[o.ID] = true
+			}
+		}
+		if rep := a.Reconcile(handled); rep.Events > 0 || len(rep.Skipped) > 0 || len(rep.Errors) > 0 {
+			reports = append(reports, rep)
+		}
+	}
 	return reports, nil
 }
 
