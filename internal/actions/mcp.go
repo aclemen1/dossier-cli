@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/aclemen1/dossier-cli/internal/app"
+	"github.com/aclemen1/dossier-cli/internal/dossier"
 	"github.com/aclemen1/dossier-cli/internal/spec"
 )
 
@@ -34,7 +35,7 @@ var tools = []tool{
 	{name: "resume", action: "resume", self: []string{"id"}, hide: []string{"prompt"}, description: "Bring this waiting dossier back to open."},
 	{name: "close", action: "close", self: []string{"id"}, description: "Close this dossier once the user says it is settled."},
 	{name: "open", action: "open", self: []string{"parent"}, hide: []string{"source", "thread", "url"},
-		description: "Open a new dossier that grows out of this one (it records this dossier as parent)."},
+		description: "Open a new dossier that grows out of this one (it records this dossier as parent). For an agenda item of this meeting, pass agenda = this dossier instead: the meeting then includes it and is not its parent."},
 	{name: "link", action: "link", description: "Link this dossier, or one it opened, to another: includes (agenda item) or depends_on (waits for). from defaults to this dossier.",
 		check: fromSelfOrChild},
 	{name: "unlink", action: "unlink", description: "Remove links from this dossier, or one it opened, to another. from defaults to this dossier.",
@@ -45,8 +46,8 @@ var tools = []tool{
 	{name: "notify", action: "notify", self: []string{"from"}, description: "Tell a dossier that this one includes what was decided."},
 }
 
-// fromSelfOrChild lets a session link from its own dossier or from a dossier it
-// opened (parent = this dossier).
+// fromSelfOrChild lets a session link from its own dossier, from a dossier it
+// opened (parent = this dossier) or from a point its dossier includes.
 func fromSelfOrChild(a *app.App, self string, args map[string]any) error {
 	from, _ := args["from"].(string)
 	if from == "" {
@@ -57,11 +58,11 @@ func fromSelfOrChild(a *app.App, self string, args map[string]any) error {
 	if err != nil {
 		return err
 	}
-	if d.ID == self || d.Parent == self {
+	if d.ID == self || d.Parent == self || includes(a, self, d.ID) {
 		args["from"] = d.ID
 		return nil
 	}
-	return spec.UserError("links start from this dossier (%s) or from a dossier it opened; %s is neither", self, d.ID)
+	return spec.UserError("links start from this dossier (%s), from a dossier it opened or from a point it includes; %s is none of these", self, d.ID)
 }
 
 func grepScope(a *app.App, self string, args map[string]any) error {
@@ -335,4 +336,9 @@ func toolNames() string {
 		n = append(n, t.name)
 	}
 	return strings.Join(n, ", ")
+}
+
+func includes(a *app.App, self, id string) bool {
+	d, err := a.Load(self)
+	return err == nil && d.HasLink(dossier.RelIncludes, id)
 }

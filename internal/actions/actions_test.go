@@ -223,8 +223,12 @@ func TestMCPLinksFromThisDossierOrOneItOpened(t *testing.T) {
 		t.Fatalf("link from self: %v", env)
 	}
 	env, isErr := c.call(t, "link", map[string]any{"from": "D-0002", "to": "D-0003", "rel": "includes"})
-	if !isErr || !strings.Contains(env["error"].(map[string]any)["message"].(string), "neither") {
+	if !isErr || !strings.Contains(env["error"].(map[string]any)["message"].(string), "none of these") {
 		t.Fatalf("link from a foreign dossier: %v", env)
+	}
+	a.Link("1", "2", "includes")
+	if env, isErr := c.call(t, "link", map[string]any{"from": "D-0002", "to": "D-0003", "rel": "depends_on"}); isErr {
+		t.Fatalf("link from a point this dossier includes: %v", env)
 	}
 }
 

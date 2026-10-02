@@ -224,7 +224,7 @@ func init() {
 			{Name: "thread", Kind: spec.String, Help: "Thread reference <name>:<ref>, used to attach later events."},
 			{Name: "url", Kind: spec.String, Help: "Link to the original item."},
 			{Name: "file", Kind: spec.StringList, Help: "File copied into context/ (repeatable)."},
-			{Name: "parent", Kind: spec.String, Help: "Parent dossier id."},
+			{Name: "parent", Kind: spec.String, Help: "Parent dossier id. A meeting is not the parent of its points: use --agenda."},
 			{Name: "alias", Kind: spec.String, Help: "Name for a lasting dossier, e.g. RDIR for a recurring meeting."},
 			{Name: "agenda", Kind: spec.StringList, Help: "Meeting dossier (alias or id) that includes this one (repeatable)."},
 			{Name: "no-start", Kind: spec.Bool, Help: "Create the dossier without starting its session."},

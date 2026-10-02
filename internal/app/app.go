@@ -197,6 +197,17 @@ func (a *App) route(instruction string) (*dossier.Dossier, string) {
 
 // Open opens or finds the dossier, then makes every meeting of p.Agenda include it.
 func (a *App) Open(p OpenParams) (OpenResult, error) {
+	if p.Parent != "" {
+		if parent, err := a.Load(p.Parent); err == nil {
+			for _, meeting := range p.Agenda {
+				if m, err := a.Load(meeting); err == nil && m.ID == parent.ID {
+					// A meeting includes its points; it is not their parent.
+					p.Parent = ""
+					break
+				}
+			}
+		}
+	}
 	res, err := a.open(p)
 	if err != nil || res.ID == "" {
 		return res, err
