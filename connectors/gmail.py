@@ -7,8 +7,10 @@
 Signals are yellow stars: every starred thread on the first poll, then the stars
 added since (Gmail history). A Google Task linked to the email (Shift-T) is
 optional: its notes become the instruction, and its message gets a star if the
-thread has none. Events are new replies, or a task added to a thread that already
-has its dossier. Transitions move the star: yellow (open), purple (waiting),
+thread has none. A new star counts only if it is still in place config.settle
+later (e.g. "30s"; the poll waits that long), so that cycling through the stars
+in Gmail opens nothing; a poll with "now" takes it at once. Events are new replies, or a task added to a thread that
+already has its dossier. Transitions move the star: yellow (open), purple (waiting),
 none plus the "reviewed" label and the task checked (done).
 
 Protocol 1: `gmail.py describe|poll|transition`, JSON on stdin and stdout.
@@ -22,6 +24,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 import tempfile
 from datetime import datetime, timezone
 
@@ -286,6 +289,15 @@ def starred_since(history_id):
         params["pageToken"] = page["nextPageToken"]
 
 
+def seconds(duration):
+    """'90s', '1m', '2h' or a number of seconds; 0 when empty."""
+    d = str(duration or "").strip().lower()
+    if not d:
+        return 0
+    unit = {"s": 1, "m": 60, "h": 3600}.get(d[-1])
+    return int(float(d[:-1]) * unit) if unit else int(float(d))
+
+
 def parse_cursor(c):
     if not c:
         return {}
@@ -339,8 +351,9 @@ def poll(inp):
         candidates = starred_threads()
     for tid, mid in task_threads.items():
         candidates.setdefault(tid, mid)
+    settle = 0 if inp.get("now") else seconds(cfg.get("settle"))
 
-    signals, events = [], []
+    signals, events, starred = [], [], []
     for tid, mid in candidates.items():
         ref = f"gmail:thread/{tid}"
         if ref in watch:
@@ -351,9 +364,18 @@ def poll(inp):
                 events.append({"thread_ref": ref, "kind": "instruction", "summary": summary,
                                "files": [], "at": started, "in": sorted(holders.get(tid, ()))})
             continue
-        labels = thread_labels(tid)
-        if not any(yellow(l) for _, l in labels) and not (tid in task_threads and dry):
-            continue
+        if tid in task_threads or any(yellow(l) for _, l in thread_labels(tid)):
+            starred.append((tid, mid))
+
+    # A star must still be there after the settle delay: going through the
+    # yellow star on the way to another one opens nothing. A task is deliberate.
+    if settle and any(tid not in task_threads for tid, _ in starred):
+        time.sleep(settle)
+        starred = [(tid, mid) for tid, mid in starred
+                   if tid in task_threads or any(yellow(l) for _, l in thread_labels(tid))]
+
+    for tid, mid in starred:
+        ref = f"gmail:thread/{tid}"
         t = thread(tid)
         msgs = t.get("messages", [])
         if not msgs:

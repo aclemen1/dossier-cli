@@ -131,6 +131,41 @@ func run(root, id, verb string, args ...string) tea.Cmd {
 	}
 }
 
+// ingestNow polls every store at once, without the settle delay of a source,
+// and sums up what it opened or woke.
+func ingestNow(roots []string) tea.Cmd {
+	return func() tea.Msg {
+		exe, err := os.Executable()
+		if err != nil {
+			return doneMsg{id: "ingest", verb: "ingest", err: err}
+		}
+		var news, failures []string
+		for _, root := range roots {
+			out, err := exec.Command(exe, "ingest", "--now", "--store", root, "--format", "text").CombinedOutput()
+			if err != nil {
+				failures = append(failures, filepath.Base(root)+": "+firstLine(string(out), err.Error()))
+				continue
+			}
+			for _, l := range strings.Split(string(out), "\n") {
+				l = strings.TrimSpace(l)
+				if strings.HasPrefix(l, "error") {
+					failures = append(failures, filepath.Base(root)+": "+l)
+				} else if f := strings.Fields(l); len(f) == 2 && f[0] != "skip" {
+					news = append(news, f[0]+" "+f[1])
+				}
+			}
+		}
+		if len(failures) > 0 {
+			return doneMsg{id: "ingest", verb: "ingest", out: strings.Join(failures, " · "), err: fmt.Errorf("ingest failed")}
+		}
+		summary := "ingest: nothing new"
+		if len(news) > 0 {
+			summary = "ingest: " + strings.Join(news, ", ")
+		}
+		return doneMsg{id: "ingest", verb: "ingest", out: summary}
+	}
+}
+
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -217,6 +252,9 @@ func (m *model) key(k string) tea.Cmd {
 		m.reload()
 	case "r":
 		m.reload()
+	case "i":
+		m.status, m.statusErr = "ingest: polling every source now…", false
+		return ingestNow(m.roots)
 	case "tab":
 		m.detail = !m.detail
 	case "enter":
@@ -454,7 +492,7 @@ func (m *model) bottomBar() string {
 	}
 	line := keyLine([][2]string{{"enter", "pane"}, {"W", "wait"}, {"u", "resume"}, {"x", "close"}, {"n", "no action"},
 		{"s", "start"}, {"o", "start + prompt"}, {"R", "restart"}}) + "\n" +
-		keyLine([][2]string{{"↑↓", "move"}, {"J K", "scroll"}, {"t", "to do"}, {"w", "by person"}, {"a", "all"},
+		keyLine([][2]string{{"↑↓", "move"}, {"J K", "scroll"}, {"i", "ingest now"}, {"t", "to do"}, {"w", "by person"}, {"a", "all"},
 			{"p", "priority"}, {"/", "filter"}, {"tab", "detail"}, {"q", "quit"}})
 	if len(m.errs) > 0 {
 		line = lipgloss.NewStyle().Foreground(cStopped).Render(m.errs[0])

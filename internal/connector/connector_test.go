@@ -37,7 +37,7 @@ func TestDescribeAndPoll(t *testing.T) {
 	if err != nil || d.Protocol != Protocol || d.Name != "fake" {
 		t.Fatalf("describe %+v %v", d, err)
 	}
-	p, err := r.Poll("cursor-1", []string{"fake:thread/thread-reply"}, false)
+	p, err := r.Poll("cursor-1", []string{"fake:thread/thread-reply"}, PollOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +69,7 @@ func TestFailuresAreNeverSilent(t *testing.T) {
 		"error": "token expired",
 	} {
 		r, _ := runner(t, mode, "")
-		_, err := r.Poll("", nil, false)
+		_, err := r.Poll("", nil, PollOptions{})
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%s: got %v, want %q", mode, err, want)
 		}

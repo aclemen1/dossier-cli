@@ -143,12 +143,18 @@ func (r Runner) Describe() (Description, error) {
 	return d, err
 }
 
-func (r Runner) Poll(cursor string, watch []string, dryRun bool) (PollResult, error) {
+// PollOptions: DryRun changes nothing at the source; Now takes what the
+// source holds at once, without the settle delay a connector may apply.
+type PollOptions struct {
+	DryRun, Now bool
+}
+
+func (r Runner) Poll(cursor string, watch []string, opt PollOptions) (PollResult, error) {
 	var p PollResult
 	if watch == nil {
 		watch = []string{}
 	}
-	err := r.run("poll", map[string]any{"config": r.Source.Config, "cursor": cursor, "watch": watch, "dry_run": dryRun}, &p)
+	err := r.run("poll", map[string]any{"config": r.Source.Config, "cursor": cursor, "watch": watch, "dry_run": opt.DryRun, "now": opt.Now}, &p)
 	return p, err
 }
 

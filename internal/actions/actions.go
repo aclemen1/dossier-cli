@@ -601,6 +601,7 @@ func init() {
 		Params: []spec.Param{
 			{Name: "source", Kind: spec.StringList, Positional: true, Help: "Source names; all declared sources when omitted."},
 			{Name: "dry-run", Kind: spec.Bool, Help: "Show what would happen; write and start nothing."},
+			{Name: "now", Kind: spec.Bool, Help: "Take new signals at once, without the settle delay of a source (config settle)."},
 		},
 		Effects: []string{
 			"Opens one dossier per new signal and starts its session in the background.",
@@ -609,7 +610,9 @@ func init() {
 		},
 		Examples: []string{"dossier ingest", "dossier ingest gmail", "dossier ingest gmail --dry-run"},
 		Run: func(ctx *spec.Context) (any, error) {
-			return withApp(ctx, true, func(a *app.App) (any, error) { return a.Ingest(ctx.List("source"), ctx.Bool("dry-run")) })
+			return withApp(ctx, true, func(a *app.App) (any, error) {
+				return a.Ingest(ctx.List("source"), connector.PollOptions{DryRun: ctx.Bool("dry-run"), Now: ctx.Bool("now")})
+			})
 		},
 		Text: func(w io.Writer, r any) {
 			for _, rep := range r.([]app.IngestReport) {

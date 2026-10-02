@@ -299,7 +299,7 @@ func TestContextFilesAreNumberedAndCompanionsFollow(t *testing.T) {
 
 func TestIngestOpensSignalsThenDeliversEvents(t *testing.T) {
 	f := newFixture(t)
-	reps, err := f.a.Ingest(nil, false)
+	reps, err := f.a.Ingest(nil, connector.PollOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -312,7 +312,7 @@ func TestIngestOpensSignalsThenDeliversEvents(t *testing.T) {
 	d, _ := f.a.Load("1")
 	f.a.SetState(d, "wait", "", "Baer SA")
 
-	reps, _ = f.a.Ingest([]string{"fake"}, false)
+	reps, _ = f.a.Ingest([]string{"fake"}, connector.PollOptions{})
 	rep := reps[0]
 	if len(rep.Skipped) != 1 || !strings.Contains(rep.Skipped[0], "already in D-0001") {
 		t.Fatalf("second ingest skipped %+v", rep)
@@ -334,7 +334,7 @@ func TestIngestOpensSignalsThenDeliversEvents(t *testing.T) {
 
 func TestIngestDryRunChangesNothing(t *testing.T) {
 	f := newFixture(t)
-	reps, _ := f.a.Ingest(nil, true)
+	reps, _ := f.a.Ingest(nil, connector.PollOptions{DryRun: true})
 	dirs, _ := f.a.S.Dirs()
 	if len(dirs) != 0 || len(reps[0].Skipped) != 1 || f.a.cursors()["fake"] != "" {
 		t.Fatalf("dry run wrote something: %+v %d", reps, len(dirs))
@@ -349,11 +349,11 @@ func TestIngestDryRunChangesNothing(t *testing.T) {
 func TestIngestKeepsTheCursorWhenTheSourceFails(t *testing.T) {
 	f := newFixture(t)
 	f.setMode("error")
-	reps, _ := f.a.Ingest(nil, false)
+	reps, _ := f.a.Ingest(nil, connector.PollOptions{})
 	if len(reps[0].Errors) != 1 || f.a.cursors()["fake"] != "" {
 		t.Fatalf("%+v", reps)
 	}
-	if _, err := f.a.Ingest([]string{"nope"}, false); err == nil || !strings.Contains(err.Error(), "Declared: fake") {
+	if _, err := f.a.Ingest([]string{"nope"}, connector.PollOptions{}); err == nil || !strings.Contains(err.Error(), "Declared: fake") {
 		t.Fatalf("unknown source: %v", err)
 	}
 }

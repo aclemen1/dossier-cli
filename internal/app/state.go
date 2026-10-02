@@ -396,7 +396,8 @@ func (a *App) saveCursor(source, cursor string) error {
 	return os.Rename(tmp, a.S.Meta("cursors.json"))
 }
 
-func (a *App) Ingest(names []string, dryRun bool) ([]IngestReport, error) {
+func (a *App) Ingest(names []string, opt connector.PollOptions) ([]IngestReport, error) {
+	dryRun := opt.DryRun
 	sources := a.S.Config.Sources
 	if len(names) > 0 {
 		sources = nil
@@ -431,7 +432,7 @@ func (a *App) Ingest(names []string, dryRun bool) ([]IngestReport, error) {
 				}
 			}
 		}
-		res, err := (connector.Runner{Store: a.S, Source: src}).Poll(a.cursors()[src.Name], watch, dryRun)
+		res, err := (connector.Runner{Store: a.S, Source: src}).Poll(a.cursors()[src.Name], watch, opt)
 		if err != nil {
 			rep.Errors = append(rep.Errors, err.Error())
 			reports = append(reports, rep)
