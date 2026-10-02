@@ -45,6 +45,8 @@ type model struct {
 	width      int
 	height     int
 	all        bool
+	todo       bool
+	ask        *ask // the form on the bottom line, when one is open
 	filter     string
 	typing     bool
 	detail     bool
@@ -76,7 +78,7 @@ func (m *model) reload() {
 	if r := m.selected(); r != nil {
 		key = r.store.root + "|" + r.d.ID
 	}
-	m.rows, m.stores, m.errs = load(m.roots, view{all: m.all, filter: m.filter, byPerson: m.byPerson, byPriority: m.byPriority})
+	m.rows, m.stores, m.errs = load(m.roots, view{all: m.all, todo: m.todo, filter: m.filter, byPerson: m.byPerson, byPriority: m.byPriority})
 	m.waitW = 0
 	for _, r := range m.rows {
 		if r.d != nil && r.d.State == dossier.Waiting {
@@ -143,11 +145,20 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case msg.verb == "restart":
 			m.status, m.statusErr = msg.id+": session restarted, no prompt sent", false
 		case msg.verb == "park" || msg.verb == "unpark":
-		default:
+		case msg.verb == "attach":
 			m.status, m.statusErr = msg.id+": pane focused", false
+		default:
+			m.status, m.statusErr = firstLine(msg.out, msg.id+": done"), false
 		}
 		m.reload()
 	case tea.KeyMsg:
+		if m.ask != nil {
+			finished, cmd := m.ask.key(msg)
+			if finished {
+				m.ask = nil
+			}
+			return m, cmd
+		}
 		if m.typing {
 			return m, m.typeFilter(msg)
 		}
@@ -186,13 +197,17 @@ func (m *model) key(k string) tea.Cmd {
 			m.scroll = 0
 		}
 	case "a":
-		m.all = !m.all
+		m.all, m.todo = !m.all, false
+		m.reload()
+	case "t":
+		m.todo, m.all, m.byPerson = !m.todo, false, false
+		m.offset = 0
 		m.reload()
 	case "p":
 		m.byPriority = !m.byPriority
 		m.reload()
 	case "w":
-		m.byPerson = !m.byPerson
+		m.byPerson, m.todo = !m.byPerson, false
 		m.offset = 0
 		m.reload()
 	case "/":
@@ -230,6 +245,10 @@ func (m *model) key(k string) tea.Cmd {
 		}
 		m.status, m.statusErr = r.d.Label()+": starting its session with the open prompt…", false
 		return run(r.store.root, r.d.ID, "attach")
+	case "W", "u", "x":
+		if r != nil {
+			return m.stateKey(k, r)
+		}
 	case "n":
 		if r == nil {
 			break
@@ -355,7 +374,7 @@ func (m *model) wide() bool { return m.width >= 110 }
 
 // listHeight is the room between the top bar and the bottom bar.
 func (m *model) listHeight() int {
-	h := m.height - 6
+	h := m.height - 8
 	if h < 3 {
 		h = 3
 	}
@@ -397,6 +416,9 @@ func (m *model) topBar() string {
 	if m.all {
 		scope = "all states"
 	}
+	if m.todo {
+		scope = "to do"
+	}
 	order := "by number"
 	if m.byPriority {
 		order = "by priority"
@@ -417,16 +439,23 @@ func (m *model) topBar() string {
 }
 
 func (m *model) bottomBar() string {
-	keys := [][2]string{{"↑↓", "move"}, {"enter", "pane"}, {"s", "start"}, {"o", "start + prompt"}, {"R", "restart"}, {"n", "no action"},
-		{"J K", "scroll"}, {"p", "priority"}, {"w", "by person"}, {"a", "all"}, {"/", "filter"}, {"tab", "detail"}, {"q", "quit"}}
-	var parts []string
-	for _, k := range keys {
-		if k[0] == "tab" && m.wide() {
-			continue
-		}
-		parts = append(parts, sText.Render(k[0])+" "+sMuted.Render(k[1]))
+	if m.ask != nil {
+		return lipgloss.NewStyle().MaxWidth(m.width - 1).Render(m.ask.view())
 	}
-	line := strings.Join(parts, sFaint.Render("  ·  "))
+	keyLine := func(keys [][2]string) string {
+		var parts []string
+		for _, k := range keys {
+			if k[0] == "tab" && m.wide() {
+				continue
+			}
+			parts = append(parts, sText.Render(k[0])+" "+sMuted.Render(k[1]))
+		}
+		return strings.Join(parts, sFaint.Render("  ·  "))
+	}
+	line := keyLine([][2]string{{"enter", "pane"}, {"W", "wait"}, {"u", "resume"}, {"x", "close"}, {"n", "no action"},
+		{"s", "start"}, {"o", "start + prompt"}, {"R", "restart"}}) + "\n" +
+		keyLine([][2]string{{"↑↓", "move"}, {"J K", "scroll"}, {"t", "to do"}, {"w", "by person"}, {"a", "all"},
+			{"p", "priority"}, {"/", "filter"}, {"tab", "detail"}, {"q", "quit"}})
 	if len(m.errs) > 0 {
 		line = lipgloss.NewStyle().Foreground(cStopped).Render(m.errs[0])
 	}
