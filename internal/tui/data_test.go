@@ -35,7 +35,7 @@ func TestTreeNestsIncludedDossiersAndSurvivesCycles(t *testing.T) {
 	if got := Stores(root); len(got) != 1 {
 		t.Fatalf("stores %v", got)
 	}
-	rows, _, errs := load(Stores(root), false, "", false)
+	rows, _, errs := load(Stores(root), view{})
 	if len(errs) > 0 {
 		t.Fatal(errs)
 	}
@@ -55,7 +55,7 @@ func TestTreeNestsIncludedDossiersAndSurvivesCycles(t *testing.T) {
 	if strings.Join(got, ",") != want {
 		t.Fatalf("rows\n got %s\nwant %s", strings.Join(got, ","), want)
 	}
-	if rows, _, _ := load(Stores(root), false, "seul", false); len(rows) != 2 || rows[1].d.Title != "Seul" {
+	if rows, _, _ := load(Stores(root), view{filter: "seul"}); len(rows) != 2 || rows[1].d.Title != "Seul" {
 		t.Fatalf("filter: %+v", rows)
 	}
 }
@@ -69,7 +69,7 @@ func TestLinksGroupEveryRelationOfALinkedDossier(t *testing.T) {
 	a.Open(app.OpenParams{Title: "Point", NoStart: true})
 	a.Link("1", "2", dossier.RelIncludes)
 	a.Link("1", "2", dossier.RelDependsOn)
-	rows, _, _ := load(Stores(root), false, "", false)
+	rows, _, _ := load(Stores(root), view{})
 	ls := links(rows[1].store, rows[1].d)
 	if len(ls) != 1 || ls[0].id != "D-0002" || strings.Join(ls[0].rels, ",") != "includes,depends on" {
 		t.Fatalf("séance links %+v", ls)
@@ -93,7 +93,7 @@ func TestWaitingRowsGroupByPersonSoonestFirst(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	rows, _, _ := load(Stores(root), false, "", true)
+	rows, _, _ := load(Stores(root), view{byPerson: true})
 	var got []string
 	for _, r := range rows {
 		switch {
@@ -105,5 +105,38 @@ func TestWaitingRowsGroupByPersonSoonestFirst(t *testing.T) {
 	}
 	if want := "#Livit,D-0003,D-0001,#Patricia,D-0002"; strings.Join(got, ",") != want {
 		t.Fatalf("got %s want %s", strings.Join(got, ","), want)
+	}
+}
+
+func TestPriorityRaisesAMeetingWhosePointIsDue(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	root := t.TempDir()
+	s, _ := store.Init(filepath.Join(root, "pro"), "pro", false)
+	a := &app.App{S: s}
+	a.Open(app.OpenParams{Title: "Ouvert", NoStart: true})
+	a.Open(app.OpenParams{Title: "Plus tard", NoStart: true})
+	a.Open(app.OpenParams{Title: "Séance", NoStart: true})
+	a.Open(app.OpenParams{Title: "Point échu", NoStart: true})
+	a.Link("3", "4", dossier.RelIncludes)
+	for id, until := range map[string]string{"2": "2099-01-01", "4": "2000-01-01"} {
+		d, _ := a.Load(id)
+		d.WaitUntil = until + "T23:59:59+01:00"
+		a.SetState(d, "wait", "", "Patricia")
+	}
+	order := func(v view) string {
+		rows, _, _ := load(Stores(root), v)
+		var got []string
+		for _, r := range rows {
+			if r.d != nil {
+				got = append(got, r.d.Title)
+			}
+		}
+		return strings.Join(got, ",")
+	}
+	if got, want := order(view{byPriority: true}), "Séance,Point échu,Ouvert,Plus tard"; got != want {
+		t.Fatalf("by priority\n got %s\nwant %s", got, want)
+	}
+	if got, want := order(view{}), "Ouvert,Séance,Point échu,Plus tard"; got != want {
+		t.Fatalf("by number\n got %s\nwant %s", got, want)
 	}
 }

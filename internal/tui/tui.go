@@ -24,31 +24,32 @@ func Run(root string) error {
 	if len(roots) == 0 {
 		return fmt.Errorf("no dossier store under %s: a store is a directory holding .dossier/config.toml", root)
 	}
-	m := &model{roots: roots, root: root}
+	m := &model{roots: roots, root: root, byPriority: true}
 	m.reload()
 	_, err := tea.NewProgram(m, tea.WithAltScreen()).Run()
 	return err
 }
 
 type model struct {
-	root      string
-	roots     []string
-	rows      []row
-	stores    []*storeView
-	byPerson  bool
-	waitW     int // width of the waiting column, 0 when nothing waits
-	errs      []string
-	cursor    int
-	offset    int
-	scroll    int // first line of the detail panel
-	width     int
-	height    int
-	all       bool
-	filter    string
-	typing    bool
-	detail    bool
-	status    string
-	statusErr bool
+	root       string
+	roots      []string
+	rows       []row
+	stores     []*storeView
+	byPerson   bool
+	byPriority bool
+	waitW      int // width of the waiting column, 0 when nothing waits
+	errs       []string
+	cursor     int
+	offset     int
+	scroll     int // first line of the detail panel
+	width      int
+	height     int
+	all        bool
+	filter     string
+	typing     bool
+	detail     bool
+	status     string
+	statusErr  bool
 }
 
 type tickMsg time.Time
@@ -75,7 +76,7 @@ func (m *model) reload() {
 	if r := m.selected(); r != nil {
 		key = r.store.root + "|" + r.d.ID
 	}
-	m.rows, m.stores, m.errs = load(m.roots, m.all, m.filter, m.byPerson)
+	m.rows, m.stores, m.errs = load(m.roots, view{all: m.all, filter: m.filter, byPerson: m.byPerson, byPriority: m.byPriority})
 	m.waitW = 0
 	for _, r := range m.rows {
 		if r.d != nil && r.d.State == dossier.Waiting {
@@ -185,6 +186,9 @@ func (m *model) key(k string) tea.Cmd {
 		}
 	case "a":
 		m.all = !m.all
+		m.reload()
+	case "p":
+		m.byPriority = !m.byPriority
 		m.reload()
 	case "w":
 		m.byPerson = !m.byPerson
@@ -308,8 +312,12 @@ func activityMark(a string) string {
 	switch a {
 	case "working":
 		return lipgloss.NewStyle().Foreground(cWorking).Render("◉")
-	case "ready", "idle":
+	case "ready":
+		return lipgloss.NewStyle().Foreground(cWorking).Bold(true).Render("●")
+	case "idle":
 		return lipgloss.NewStyle().Foreground(cReady).Render("●")
+	case "blocked":
+		return lipgloss.NewStyle().Foreground(cStopped).Bold(true).Render("◆")
 	case "stopped":
 		return lipgloss.NewStyle().Foreground(cStopped).Render("○")
 	case "none":
@@ -324,6 +332,10 @@ func activityWord(a string) string {
 		return "no session"
 	case "stopped":
 		return "no tab"
+	case "ready":
+		return "your turn"
+	case "blocked":
+		return "asks a permission"
 	}
 	return a
 }
@@ -374,6 +386,11 @@ func (m *model) topBar() string {
 	if m.all {
 		scope = "all states"
 	}
+	order := "by number"
+	if m.byPriority {
+		order = "by priority"
+	}
+	scope += "  ·  " + order
 	if m.byPerson {
 		scope = "waiting, by person"
 	}
@@ -390,7 +407,7 @@ func (m *model) topBar() string {
 
 func (m *model) bottomBar() string {
 	keys := [][2]string{{"↑↓", "move"}, {"enter", "pane"}, {"s", "start"}, {"o", "start + prompt"}, {"R", "restart"},
-		{"J K", "scroll"}, {"w", "by person"}, {"a", "all"}, {"/", "filter"}, {"tab", "detail"}, {"q", "quit"}}
+		{"J K", "scroll"}, {"p", "priority"}, {"w", "by person"}, {"a", "all"}, {"/", "filter"}, {"tab", "detail"}, {"q", "quit"}}
 	var parts []string
 	for _, k := range keys {
 		if k[0] == "tab" && m.wide() {

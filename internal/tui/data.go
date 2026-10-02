@@ -74,7 +74,16 @@ func shown(d *dossier.Dossier, all bool, filter string) bool {
 
 // load reads every store. byPerson lays the waiting dossiers out by whom they
 // wait on instead of the store trees.
-func load(roots []string, all bool, filter string, byPerson bool) ([]row, []*storeView, []string) {
+// view says what load shows and in which order.
+type view struct {
+	all        bool   // every state, not only open and waiting
+	filter     string // substring of id, alias, title or whom it waits on
+	byPerson   bool   // waiting dossiers grouped by whom they wait on
+	byPriority bool   // what needs you first, instead of by number
+}
+
+func load(roots []string, v view) ([]row, []*storeView, []string) {
+	filter, byPerson := v.filter, v.byPerson
 	var rows []row
 	var stores []*storeView
 	var errs []string
@@ -108,7 +117,7 @@ func load(roots []string, all bool, filter string, byPerson bool) ([]row, []*sto
 			rows = append(rows, row{})
 		}
 		rows = append(rows, row{header: name, store: sv})
-		rows = append(rows, treeRows(sv, ds, live, all, filter)...)
+		rows = append(rows, treeRows(sv, ds, live, v)...)
 	}
 	if byPerson {
 		rows = waitingRows(stores, filter)
@@ -185,10 +194,10 @@ func PersonOf(on string) string {
 // treeRows lays the shown dossiers out as a forest: a dossier appears under
 // each shown dossier that includes it, and at the top level only when no shown
 // dossier includes it.
-func treeRows(sv *storeView, ds []*dossier.Dossier, live map[string]string, all bool, filter string) []row {
+func treeRows(sv *storeView, ds []*dossier.Dossier, live map[string]string, v view) []row {
 	visible := map[string]bool{}
 	for _, d := range ds {
-		if shown(d, all, filter) {
+		if shown(d, v.all, v.filter) {
 			visible[d.ID] = true
 		}
 	}
@@ -205,8 +214,27 @@ func treeRows(sv *storeView, ds []*dossier.Dossier, live map[string]string, all 
 			held[id] = true
 		}
 	}
+	var rank map[string]urgency
+	if v.byPriority {
+		own := map[string]urgency{}
+		var ids []string
+		now := time.Now()
+		for _, d := range ds {
+			if visible[d.ID] {
+				own[d.ID] = urgencyOf(d, app.Activity(d, live), now)
+				ids = append(ids, d.ID)
+			}
+		}
+		rank = effective(ids, children, own)
+	}
 	order := func(ids []string) {
-		sort.SliceStable(ids, func(i, j int) bool { return less(sv.byID[ids[i]], sv.byID[ids[j]]) })
+		sort.SliceStable(ids, func(i, j int) bool {
+			a, b := ids[i], ids[j]
+			if rank != nil && rank[a] != rank[b] {
+				return rank[a].before(rank[b])
+			}
+			return less(sv.byID[a], sv.byID[b])
+		})
 	}
 	var roots []string
 	for _, d := range ds {
