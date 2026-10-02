@@ -596,16 +596,19 @@ func (m *model) detailView(w, h int) string {
 		head += sMuted.Render("  ·  " + d.ID)
 	}
 	add(head, "", wrap.Inherit(sBold).Render(d.Title))
+	if len(d.Sources) > 0 {
+		add(sMuted.Render("from ") + sText.Render(sourceKind(d.Sources[0].ID)))
+	}
+	if d.State == dossier.Waiting {
+		add("", lipgloss.NewStyle().Bold(true).Foreground(cWaiting).Width(w).Render("⏳ waiting on "+d.WaitingOn))
+		if d.WaitUntil != "" {
+			add(sMuted.Render("   chase "+dayMonthYear(d.WaitUntil)+"  ") + remaining(d.WaitUntil))
+		}
+	}
 
 	section("Status")
 	field("state", stateStyle(d.State).Render(d.State))
 	field("agent", activityMark(r.activity)+" "+sText.Render(activityWord(r.activity)))
-	if d.State == dossier.Waiting {
-		field("waiting on", sText.Render(truncate(d.WaitingOn, w-12)))
-		if d.WaitUntil != "" {
-			field("chase", sText.Render(when(d.WaitUntil)))
-		}
-	}
 	if len(r.blocked) > 0 {
 		field("blocked by", lipgloss.NewStyle().Foreground(cStopped).Render(strings.Join(r.blocked, ", ")))
 	}
@@ -637,7 +640,7 @@ func (m *model) detailView(w, h int) string {
 	if len(d.Sources) > 0 || len(d.Threads) > 0 {
 		section("Sources")
 		for _, s := range d.Sources {
-			add(sText.Render(truncate(s.ID, w)))
+			add(sBold.Render(sourceKind(s.ID)) + sFaint.Render("  "+truncate(s.ID, w-lipgloss.Width(sourceKind(s.ID))-2)))
 			if s.Title != "" && s.Title != d.Title {
 				add(sMuted.Render("  " + truncate(s.Title, w-2)))
 			}
@@ -688,6 +691,34 @@ func (m *model) detailView(w, h int) string {
 		lines = append(lines, sFaint.Render("… J to scroll"))
 	}
 	return strings.Join(lines, "\n")
+}
+
+// sourceKind names what a source reference points at: a Gmail thread, a
+// voice memo, a reminder, or a dossier added by hand.
+func sourceKind(ref string) string {
+	name, rest, _ := strings.Cut(ref, ":")
+	kind, _, _ := strings.Cut(rest, "/")
+	switch name + ":" + kind {
+	case "gmail:thread":
+		return "✉  Gmail thread"
+	case "gmail:task", "tasks:task":
+		return "☑  Google Tasks task"
+	case "memos:memo":
+		return "♪  Voice memo"
+	case "reminders:item":
+		return "⚑  Apple Reminder"
+	}
+	if name == "manual" {
+		return "✎  Added by hand or by an agent"
+	}
+	return name + " " + kind
+}
+
+func dayMonthYear(ts string) string {
+	if t, err := time.Parse(time.RFC3339, ts); err == nil {
+		return t.Local().Format("02.01.2006")
+	}
+	return ts
 }
 
 // renderNotes shows the Markdown body: headings bold, the rest wrapped.
