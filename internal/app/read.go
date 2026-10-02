@@ -32,6 +32,9 @@ type Row struct {
 	State     string   `json:"state"`
 	Activity  string   `json:"activity"`
 	WaitingOn string   `json:"waiting_on,omitempty"`
+	WaitUntil string   `json:"wait_until,omitempty"`
+	Alias     string   `json:"alias,omitempty"`
+	Label     string   `json:"label"`
 	Parent    string   `json:"parent,omitempty"`
 	Updated   string   `json:"updated"`
 	Pending   int      `json:"pending_transitions,omitempty"`
@@ -72,7 +75,7 @@ func (a *App) List(status, parent string) ([]Row, error) {
 			continue
 		}
 		rows = append(rows, Row{ID: d.ID, Title: d.Title, State: d.State, Activity: Activity(d, panesNow),
-			WaitingOn: d.WaitingOn, Parent: d.Parent, Updated: d.Updated, Pending: len(d.Run.PendingTransitions), BlockedBy: BlockedBy(d, idx)})
+			WaitingOn: d.WaitingOn, WaitUntil: d.WaitUntil, Alias: d.Alias, Label: d.Label(), Parent: d.Parent, Updated: d.Updated, Pending: len(d.Run.PendingTransitions), BlockedBy: BlockedBy(d, idx)})
 	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i].ID < rows[j].ID })
 	return rows, nil

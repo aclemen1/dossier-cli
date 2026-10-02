@@ -25,6 +25,8 @@ default_instruction = "Prepare a proposal for the next step, then wait for my de
 [lifecycle]
 # States whose tab closes on its own. The session stays resumable.
 close_tab_on = ["done"]
+# Wait before a waiting dossier wakes up and asks whether to chase.
+default_wait = "7d"
 
 [routing]
 # An instruction starting with one of these, followed by a number, is routed
@@ -61,6 +63,11 @@ const eventPromptTemplate = `New on dossier {{id}}: {{summary}}
 Content: {{files}}
 
 Read it, then tell me what it changes.
+`
+
+const deadlinePromptTemplate = `No answer on dossier {{id}} by the agreed date: {{summary}}
+
+Should we chase? Propose a short follow-up as a draft, and wait for my decision.
 `
 
 const indexTemplate = `---

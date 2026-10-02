@@ -144,9 +144,8 @@ func (a *App) agentSettings() (string, error) {
 			"type": "command", "command": q + " hook guard", "timeout": 10,
 		}}}}
 		for _, p := range prot {
-			for _, tool := range []string{"Edit", "Write", "NotebookEdit"} {
-				deny = append(deny, tool+"(/"+p+"/**)")
-			}
+			// An Edit rule covers every file-editing tool; Write(path) is not matched.
+			deny = append(deny, "Edit(/"+p+"/**)")
 		}
 	}
 	settings["permissions"] = map[string]any{"allow": []string{"mcp__dossier"}, "deny": deny}

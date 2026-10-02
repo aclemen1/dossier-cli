@@ -89,9 +89,10 @@ func Init(root, sphere string, makeDefault bool) (*Store, error) {
 	}
 	sub := func(t string) string { return strings.ReplaceAll(t, "{{sphere}}", sphere) }
 	files := map[string]string{
-		filepath.Join(metaDir, "config.toml"):         sub(configTemplate),
-		filepath.Join(metaDir, "prompts", "open.md"):  openPromptTemplate,
-		filepath.Join(metaDir, "prompts", "event.md"): eventPromptTemplate,
+		filepath.Join(metaDir, "config.toml"):            sub(configTemplate),
+		filepath.Join(metaDir, "prompts", "open.md"):     openPromptTemplate,
+		filepath.Join(metaDir, "prompts", "event.md"):    eventPromptTemplate,
+		filepath.Join(metaDir, "prompts", "deadline.md"): deadlinePromptTemplate,
 		"index.md":   sub(indexTemplate),
 		"CLAUDE.md":  sub(charterTemplate),
 		".gitignore": gitignoreTemplate,
@@ -240,10 +241,7 @@ func (s *Store) ResolvePath(p string) string {
 }
 
 func (s *Store) PromptTemplate(name string) (string, error) {
-	rel := s.Config.Prompt.Open
-	if name == "event" {
-		rel = s.Config.Prompt.Event
-	}
+	rel := map[string]string{"open": s.Config.Prompt.Open, "event": s.Config.Prompt.Event, "deadline": s.Config.Prompt.Deadline}[name]
 	if rel == "" {
 		rel = filepath.Join("prompts", name+".md")
 	}

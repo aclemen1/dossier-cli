@@ -32,6 +32,7 @@ type Signal struct {
 	Files       []File         `json:"files"`
 	URL         string         `json:"url"`
 	At          string         `json:"at"`
+	Agenda      []string       `json:"agenda,omitempty"` // meetings that include the dossier
 }
 
 type Event struct {
@@ -40,6 +41,7 @@ type Event struct {
 	Summary   map[string]any `json:"summary"`
 	Files     []File         `json:"files"`
 	At        string         `json:"at"`
+	Agenda    []string       `json:"agenda,omitempty"`
 }
 
 type PollResult struct {

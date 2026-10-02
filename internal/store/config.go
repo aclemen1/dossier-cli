@@ -42,11 +42,14 @@ type AgentSection struct {
 type PromptSection struct {
 	Open               string `toml:"open"`
 	Event              string `toml:"event"`
+	Deadline           string `toml:"deadline"`
+	Locale             string `toml:"locale"`
 	DefaultInstruction string `toml:"default_instruction"`
 }
 
 type Lifecycle struct {
-	CloseTabOn []string `toml:"close_tab_on"`
+	CloseTabOn  []string `toml:"close_tab_on"`
+	DefaultWait string   `toml:"default_wait"`
 }
 
 type Routing struct {

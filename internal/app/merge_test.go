@@ -83,3 +83,19 @@ func TestGrepReadsMessageTextAcrossTranscripts(t *testing.T) {
 		t.Fatal("bad regexp accepted")
 	}
 }
+
+func TestMergeRedirectsIncomingLinks(t *testing.T) {
+	f := newFixture(t)
+	for _, title := range []string{"Séance", "Relais SMTP", "Relais SMTP dans GCP"} {
+		f.a.Open(OpenParams{Title: title, NoStart: true})
+	}
+	f.a.Link("1", "2", dossier.RelIncludes)
+	f.a.Link("1", "3", dossier.RelIncludes)
+	if _, err := f.a.Merge("3", "2"); err != nil {
+		t.Fatal(err)
+	}
+	meeting, _ := f.a.Load("1")
+	if len(meeting.Links) != 1 || meeting.Links[0].To != "D-0002" {
+		t.Fatalf("links after merge %v", meeting.Links)
+	}
+}

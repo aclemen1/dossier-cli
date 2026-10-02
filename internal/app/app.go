@@ -39,11 +39,59 @@ func (a *App) Load(id string) (*dossier.Dossier, error) {
 	if id == "" {
 		return nil, spec.UserError("no dossier id given and DOSSIER_ID is not set. Pass one, for example `dossier show D-0042`")
 	}
+	if d := a.byAlias(id); d != nil {
+		return d, nil
+	}
 	dir, err := a.S.FindDir(id)
 	if err != nil {
 		return nil, err
 	}
 	return dossier.Load(dir)
+}
+
+var aliasRe = regexp.MustCompile(`^[A-Z][A-Z0-9-]{0,15}$`)
+
+// NormalizeAlias uppercases an alias and drops the store prefix: "u-rdir" → "RDIR".
+func (a *App) NormalizeAlias(s string) string {
+	s = strings.ToUpper(strings.TrimSpace(s))
+	return strings.TrimPrefix(s, a.S.Prefix()+"-")
+}
+
+// byAlias finds the dossier named RDIR or U-RDIR. Ids that start with a digit
+// after the prefix are numbers, never aliases.
+func (a *App) byAlias(id string) *dossier.Dossier {
+	name := a.NormalizeAlias(id)
+	if !aliasRe.MatchString(name) {
+		return nil
+	}
+	all, _ := a.All()
+	for _, d := range all {
+		if d.Alias == name {
+			return d
+		}
+	}
+	return nil
+}
+
+// SetAlias names a dossier. An alias is unique in the store; "" removes it.
+func (a *App) SetAlias(d *dossier.Dossier, alias string) error {
+	alias = a.NormalizeAlias(alias)
+	if alias != "" {
+		if !aliasRe.MatchString(alias) {
+			return spec.UserError("alias %q must start with a letter and hold up to 16 letters, digits or dashes, e.g. RDIR", alias)
+		}
+		if other := a.byAlias(alias); other != nil && other.ID != d.ID {
+			return spec.UserError("alias %s is already %s (%s)", alias, other.ID, other.Title)
+		}
+	}
+	old := d.Alias
+	d.Alias = alias
+	if err := d.Save(); err != nil {
+		return err
+	}
+	_ = d.Log("alias %q → %q", old, alias)
+	renameTab(d.Run.TabID, TabLabel(d))
+	return nil
 }
 
 func (a *App) All() ([]*dossier.Dossier, error) {
@@ -103,18 +151,21 @@ type OpenParams struct {
 	Summary     map[string]any
 	Files       []connector.File
 	Parent      string
+	Alias       string
+	Agenda      []string // aliases or ids of meetings that include this dossier
 	NoStart     bool
 }
 
 type OpenResult struct {
-	ID       string `json:"id"`
-	Dir      string `json:"dir"`
-	Outcome  string `json:"outcome"` // created | existing | reopened | routed
-	Session  string `json:"session,omitempty"`
-	TabID    string `json:"tab_id,omitempty"`
-	Pending  int    `json:"pending_transitions,omitempty"`
-	Started  bool   `json:"started"`
-	Untitled bool   `json:"-"`
+	ID       string   `json:"id"`
+	Dir      string   `json:"dir"`
+	Outcome  string   `json:"outcome"` // created | existing | reopened | routed
+	Session  string   `json:"session,omitempty"`
+	TabID    string   `json:"tab_id,omitempty"`
+	Pending  int      `json:"pending_transitions,omitempty"`
+	Started  bool     `json:"started"`
+	Warnings []string `json:"warnings,omitempty"`
+	Untitled bool     `json:"-"`
 }
 
 func (r OpenResult) PendingTransitions() int { return r.Pending }
@@ -144,7 +195,34 @@ func (a *App) route(instruction string) (*dossier.Dossier, string) {
 	return nil, ""
 }
 
+// Open opens or finds the dossier, then makes every meeting of p.Agenda include it.
 func (a *App) Open(p OpenParams) (OpenResult, error) {
+	res, err := a.open(p)
+	if err != nil || res.ID == "" {
+		return res, err
+	}
+	for _, meeting := range p.Agenda {
+		if lerr := a.addToAgenda(meeting, res.ID); lerr != nil {
+			res.Warnings = append(res.Warnings, lerr.Error())
+		}
+	}
+	return res, nil
+}
+
+// addToAgenda makes the meeting dossier include the dossier, once.
+func (a *App) addToAgenda(meeting, id string) error {
+	m, err := a.Load(meeting)
+	if err != nil {
+		return fmt.Errorf("agenda %s: %w", meeting, err)
+	}
+	if m.ID == id || m.HasLink(dossier.RelIncludes, id) {
+		return nil
+	}
+	_, err = a.Link(m.ID, id, dossier.RelIncludes)
+	return err
+}
+
+func (a *App) open(p OpenParams) (OpenResult, error) {
 	if strings.TrimSpace(p.Title) == "" {
 		return OpenResult{}, spec.UserError("a dossier needs a title. Example: dossier open --title \"Armoire de pharmacie\" --instruction \"Demander une date de passage\"")
 	}
@@ -170,18 +248,24 @@ func (a *App) Open(p OpenParams) (OpenResult, error) {
 		if err := target.Save(); err != nil {
 			return OpenResult{}, err
 		}
-		pending := 0
-		if target.State == dossier.Done {
-			var err error
-			if pending, err = a.SetState(target, "reopen", "addressed by "+orManual(p.SourceRef), ""); err != nil {
-				return OpenResult{}, err
-			}
+		pending, err := a.Wake(target, "addressed by "+orManual(p.SourceRef))
+		if err != nil {
+			return OpenResult{}, err
 		}
 		res, err := a.event(target, rest, p.Summary, p.Files, p.NoStart)
 		res.Outcome, res.Pending = "routed", pending
 		return res, err
 	}
 
+	alias := a.NormalizeAlias(p.Alias)
+	if alias != "" {
+		if !aliasRe.MatchString(alias) {
+			return OpenResult{}, spec.UserError("alias %q must start with a letter and hold up to 16 letters, digits or dashes, e.g. RDIR", p.Alias)
+		}
+		if other := a.byAlias(alias); other != nil {
+			return OpenResult{}, spec.UserError("alias %s is already %s (%s)", alias, other.ID, other.Title)
+		}
+	}
 	num, dir, err := a.S.NewDir(dossier.Slug(p.Title))
 	if err != nil {
 		return OpenResult{}, err
@@ -192,6 +276,7 @@ func (a *App) Open(p OpenParams) (OpenResult, error) {
 	if instruction == "" {
 		instruction = a.S.Config.Prompt.DefaultInstruction
 	}
+	d.Alias = alias
 	d.Description = firstLine(instruction)
 	d.Resource = p.URL
 	d.Parent = p.Parent
@@ -385,7 +470,7 @@ func (a *App) client(d *dossier.Dossier) (*acp.Client, error) {
 		args = append(args, "--add-dir", store.ExpandHome(dir))
 	}
 	if cfg.Agent.RemoteControl {
-		args = append(args, "--remote-control", d.ID+" · "+d.Title)
+		args = append(args, "--remote-control", d.Label()+" · "+d.Title)
 	}
 	env := map[string]string{}
 	for k, v := range cfg.ACP.Env {
@@ -418,7 +503,26 @@ func (a *App) client(d *dossier.Dossier) (*acp.Client, error) {
 	return acp.Start(acp.Options{Command: cmd, AgentArgs: args, Env: env, Meta: meta, Cwd: d.Dir, MCP: mcp})
 }
 
+var (
+	weekdaysFR = []string{"dimanche", "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi"}
+	monthsFR   = []string{"janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"}
+)
+
+// Stamp is the first line of every prompt: when dossier sent it, weekday
+// included, so that a resumed session knows how much time has passed.
+func Stamp(t time.Time, locale string) string {
+	zone := t.Format("-07:00")
+	if strings.HasPrefix(strings.ToLower(locale), "fr") {
+		return fmt.Sprintf("[dossier · %s %d %s %d, %s (%s)]", weekdaysFR[t.Weekday()], t.Day(), monthsFR[t.Month()-1], t.Year(), t.Format("15:04"), zone)
+	}
+	return fmt.Sprintf("[dossier · %s %s (%s)]", t.Format("Monday 2 January 2006,"), t.Format("15:04"), zone)
+}
+
+// now is the clock of prompt stamps. Tests replace it.
+var now = time.Now
+
 func (a *App) sendPrompt(d *dossier.Dossier, text string) error {
+	text = Stamp(now(), a.S.Config.Prompt.Locale) + "\n\n" + text
 	c, err := a.client(d)
 	if err != nil {
 		return err
@@ -526,6 +630,70 @@ func (a *App) closeTabLater(d *dossier.Dossier, delay time.Duration) error {
 	return cmd.Process.Release()
 }
 
+// Restart closes the session's tab and resumes it in a new one, so that the
+// agent gets a fresh process: current binary, MCP server and environment.
+func (a *App) Restart(d *dossier.Dossier) error {
+	if d.Run.Session == "" {
+		return spec.UserError("%s has no session yet. Start one with `dossier attach %s`", d.ID, d.ID)
+	}
+	if a.S.Config.ClosesTabOn(d.State) && !paneAlive(d.Run.PaneID) {
+		// Its tab stays closed in this state; the next wake starts the current binary anyway.
+		return nil
+	}
+	_ = a.Archive(d)
+	if err := a.closeSession(d); err != nil {
+		return err
+	}
+	d.Run.PaneID, d.Run.TabID = "", ""
+	// herdr-acp may still be closing the old tab: retry the resume briefly.
+	var pl acp.Placement
+	for attempt := 0; ; attempt++ {
+		c, err := a.client(d)
+		if err != nil {
+			return err
+		}
+		pl, err = c.LoadSession(d.Run.Session)
+		c.Close()
+		if err == nil {
+			break
+		}
+		if attempt == 2 {
+			_ = d.Save()
+			return fmt.Errorf("%w. The session is closed but intact: resume it with `dossier attach %s`", err, d.ID)
+		}
+		time.Sleep(3 * time.Second)
+	}
+	d.Run.PaneID, d.Run.TabID = pl.PaneID, pl.TabID
+	renameTab(d.Run.TabID, TabLabel(d))
+	_ = d.Log("session restarted in tab %s", pl.TabID)
+	return d.Save()
+}
+
+// Track attaches a source reference (a thread) to a dossier.
+func (a *App) Track(id, ref string) (map[string]any, error) {
+	d, err := a.Load(id)
+	if err != nil {
+		return nil, err
+	}
+	name, rest, ok := strings.Cut(ref, ":")
+	if !ok || name == "" || rest == "" {
+		return nil, spec.UserError("%q is not a source reference. Use <source>:<kind>/<id>, e.g. gmail:thread/1a0d7b2f4c0fff93", ref)
+	}
+	if _, ok := a.S.Config.Source(name); !ok {
+		return nil, spec.UserError("no [[source]] named %q in this store; declared: %s", name, sourceNames(a.S.Config.Sources))
+	}
+	if other := a.FindBySource(ref); other != nil && other.ID != d.ID {
+		return nil, spec.UserError("%s already belongs to %s. Merge the dossiers instead: merge %s into %s", ref, other.ID, d.ID, other.ID)
+	}
+	d.AddSource(dossier.Source{ID: ref})
+	d.AddThread(ref)
+	if err := d.Save(); err != nil {
+		return nil, err
+	}
+	_ = d.Log("tracking %s", ref)
+	return map[string]any{"id": d.ID, "sources": d.Sources}, nil
+}
+
 // CloseTab closes the dossier's tab, keeping the session resumable.
 func (a *App) CloseTab(d *dossier.Dossier) error {
 	if err := a.closeSession(d); err != nil {
@@ -566,7 +734,7 @@ func TabLabel(d *dossier.Dossier) string {
 	if len(t) > tabTitleLength {
 		t = append([]rune(strings.TrimSpace(string(t[:tabTitleLength-1]))), '…')
 	}
-	return d.ID + " · " + string(t)
+	return d.Label() + " · " + string(t)
 }
 
 // renameTab labels a herdr tab. Tests replace it.

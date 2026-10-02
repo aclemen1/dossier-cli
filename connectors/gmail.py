@@ -33,6 +33,9 @@ class Fail(Exception):
     pass
 
 
+# Every `fields` mask keeps one scalar the API always returns (historyId,
+# resultSizeEstimate, etag): gws prints nothing for an empty response, and an
+# empty list must stay distinguishable from a silent failure.
 def gws(*args, params=None, body=None):
     cmd = ["gws", *args]
     if params is not None:
@@ -175,6 +178,16 @@ def attachment_files(messages, tmpdir):
     return files
 
 
+OWN = {"SENT", "DRAFT", "SCHEDULED"}
+
+
+def is_reply(m, me):
+    """A message someone else wrote: not a draft, a scheduled or sent message, nor one from this account."""
+    if OWN & set(m.get("labelIds") or []):
+        return False
+    return not (me and me in header(m, "From").lower())
+
+
 def thread(tid, fmt="full"):
     return gws("gmail", "users", "threads", "get", params={"userId": "me", "id": tid, "format": fmt})
 
@@ -186,9 +199,27 @@ def task_message_id(task):
     return None, None
 
 
+def tasklists(cfg):
+    """{tasklist id: meeting alias or ""} from config.tasklists ({title: alias}) or config.tasklist."""
+    wanted = cfg.get("tasklists") or {cfg.get("tasklist", "@default"): ""}
+    titles = {}
+    if any(k != "@default" for k in wanted):
+        page = gws("tasks", "tasklists", "list", params={"maxResults": 100, "fields": "items(id,title),etag"})
+        titles = {l["title"]: l["id"] for l in page.get("items", [])}
+    out = {}
+    for title, meeting in wanted.items():
+        if title == "@default":
+            out["@default"] = meeting or ""
+        elif title in titles:
+            out[titles[title]] = meeting or ""
+        else:
+            raise Fail(f"no Google Tasks list titled {title!r} on this account; lists: {', '.join(sorted(titles))}")
+    return out
+
+
 def list_tasks(tasklist, updated_min="", completed=False):
     params = {"tasklist": tasklist, "showCompleted": completed, "showHidden": completed, "maxResults": 100,
-              "fields": "items(id,title,notes,links,updated,status),nextPageToken"}
+              "fields": "items(id,title,notes,links,updated,status),nextPageToken,etag"}
     if updated_min:
         params["updatedMin"] = updated_min
     items = []
@@ -222,7 +253,7 @@ def yellow(labels):
 
 def starred_threads():
     """Every thread holding a yellow-starred message, for the first poll."""
-    params = {"userId": "me", "labelIds": [STARRED, YELLOW], "maxResults": 500, "fields": "messages(id,threadId),nextPageToken"}
+    params = {"userId": "me", "labelIds": [STARRED, YELLOW], "maxResults": 500, "fields": "messages(id,threadId),nextPageToken,resultSizeEstimate"}
     out = {}
     while True:
         page = gws("gmail", "users", "messages", "list", params=params)
@@ -236,7 +267,7 @@ def starred_threads():
 def starred_since(history_id):
     """Threads where a yellow star was added since history_id; None when it is too old."""
     params = {"userId": "me", "startHistoryId": history_id, "historyTypes": ["labelAdded"], "labelId": YELLOW,
-              "maxResults": 500, "fields": "history(labelsAdded(message(id,threadId),labelIds)),nextPageToken"}
+              "maxResults": 500, "fields": "history(labelsAdded(message(id,threadId),labelIds)),nextPageToken,historyId"}
     out = {}
     while True:
         try:
@@ -267,30 +298,38 @@ def parse_cursor(c):
 
 def poll(inp):
     cfg = inp.get("config") or {}
-    tasklist = cfg.get("tasklist", "@default")
+    lists = tasklists(cfg)
     dry = bool(inp.get("dry_run"))
     cur = parse_cursor(inp.get("cursor"))
     watch = set(inp.get("watch") or [])
     started = now_rfc3339()
-    history_now = gws("gmail", "users", "getProfile", params={"userId": "me", "fields": "historyId"})["historyId"]
+    profile = gws("gmail", "users", "getProfile", params={"userId": "me", "fields": "historyId,emailAddress"})
+    history_now, me = profile["historyId"], profile.get("emailAddress", "").lower()
     tmpdir = tempfile.mkdtemp(prefix="dossier-gmail-")
 
-    # 1. Shift-T tasks: their notes are instructions; an unstarred message gets its star.
-    instructions, task_titles, task_threads = {}, {}, {}
-    for task in list_tasks(tasklist, cur.get("at", "")):
-        if task.get("status") != "needsAction":
-            continue
-        mid, _ = task_message_id(task)
-        if not mid:
-            continue
-        tid = gws("gmail", "users", "messages", "get",
-                  params={"userId": "me", "id": mid, "format": "minimal", "fields": "threadId"})["threadId"]
-        task_threads[tid] = mid
-        task_titles.setdefault(tid, task.get("title") or "")
-        if (task.get("notes") or "").strip():
-            instructions[tid] = task["notes"].strip()
-        if not any(STARRED in labels for _, labels in thread_labels(tid)) and not dry:
-            modify(mid, add=[STARRED, YELLOW])
+    # 1. Shift-T tasks: their notes are instructions, their list may name a
+    # meeting; an unstarred message gets its star.
+    instructions, task_titles, task_threads, agendas = {}, {}, {}, {}
+    known = set(cur.get("lists") or [])
+    for tasklist, meeting in lists.items():
+        # A list read for the first time is read whole, whatever the cursor says.
+        since = cur.get("at", "") if (tasklist in known or not cur.get("lists") and tasklist == "@default") else ""
+        for task in list_tasks(tasklist, since):
+            if task.get("status") != "needsAction":
+                continue
+            mid, _ = task_message_id(task)
+            if not mid:
+                continue
+            tid = gws("gmail", "users", "messages", "get",
+                      params={"userId": "me", "id": mid, "format": "minimal", "fields": "threadId"})["threadId"]
+            task_threads[tid] = mid
+            task_titles.setdefault(tid, task.get("title") or "")
+            if meeting:
+                agendas.setdefault(tid, set()).add(meeting)
+            if (task.get("notes") or "").strip():
+                instructions[tid] = task["notes"].strip()
+            if not any(STARRED in labels for _, labels in thread_labels(tid)) and not dry:
+                modify(mid, add=[STARRED, YELLOW])
 
     # 2. Yellow stars: every starred thread on the first poll, new stars afterwards.
     candidates = None
@@ -305,9 +344,12 @@ def poll(inp):
     for tid, mid in candidates.items():
         ref = f"gmail:thread/{tid}"
         if ref in watch:
-            if tid in instructions:
-                events.append({"thread_ref": ref, "kind": "instruction", "summary": {"instruction": instructions[tid]},
-                               "files": [], "at": started})
+            if tid in instructions or tid in agendas:
+                summary = {"instruction": instructions[tid]} if tid in instructions else {}
+                if tid in agendas:
+                    summary["agenda"] = ", ".join(sorted(agendas[tid]))
+                events.append({"thread_ref": ref, "kind": "instruction", "summary": summary,
+                               "files": [], "at": started, "agenda": sorted(agendas.get(tid, ()))})
             continue
         labels = thread_labels(tid)
         if not any(yellow(l) for _, l in labels) and not (tid in task_threads and dry):
@@ -332,18 +374,19 @@ def poll(inp):
             "files": [{"name": "thread.md", "content": render_messages(tid, subject, msgs)}, *attachment_files(msgs, tmpdir)],
             "url": message_url(mid),
             "at": started,
+            "agenda": sorted(agendas.get(tid, ())),
         })
 
     # 3. Replies on the threads dossier watches.
     if cur.get("at"):
-        since = ms_of(cur["at"])
+        since, until = ms_of(cur["at"]), ms_of(started)
         seen = {s["thread_ref"] for s in signals}
         for ref in watch:
             if ref in seen or not ref.startswith("gmail:thread/"):
                 continue
             tid = ref.split("/", 1)[1]
             new = [m for m in thread(tid).get("messages", [])
-                   if int(m.get("internalDate", 0)) > since and "SENT" not in (m.get("labelIds") or [])]
+                   if since < int(m.get("internalDate", 0)) <= until and is_reply(m, me)]
             if not new:
                 continue
             subject = header(new[-1], "Subject")
@@ -356,7 +399,8 @@ def poll(inp):
                 "at": header(new[-1], "Date"),
             })
 
-    return {"signals": signals, "events": events, "cursor": json.dumps({"history": history_now, "at": started})}
+    return {"signals": signals, "events": events,
+            "cursor": json.dumps({"history": history_now, "at": started, "lists": sorted(lists)})}
 
 
 _reviewed = {}
@@ -372,18 +416,20 @@ def reviewed_label():
     return _reviewed["id"]
 
 
-def thread_tasks(tasklist, message_ids, completed):
+def thread_tasks(lists, message_ids, completed):
+    """(tasklist, task) for every task of the configured lists linked to the thread."""
     out = []
-    for task in list_tasks(tasklist, completed=completed):
-        mid, _ = task_message_id(task)
-        if mid in message_ids:
-            out.append(task)
+    for tasklist in lists:
+        for task in list_tasks(tasklist, completed=completed):
+            mid, _ = task_message_id(task)
+            if mid in message_ids:
+                out.append((tasklist, task))
     return out
 
 
 def transition(inp):
     cfg = inp.get("config") or {}
-    tasklist = cfg.get("tasklist", "@default")
+    lists = tasklists(cfg)
     ref, to, frm = inp["source_ref"], inp["to"], inp["from"]
     if not ref.startswith("gmail:thread/"):
         raise Fail(f"not a Gmail thread reference: {ref}")
@@ -408,14 +454,14 @@ def transition(inp):
             if l & {STARRED, YELLOW, PURPLE}:
                 modify(mid, remove=[STARRED, YELLOW, PURPLE])
         gws("gmail", "users", "threads", "modify", params={"userId": "me", "id": tid}, body={"addLabelIds": [reviewed_label()]})
-        for task in thread_tasks(tasklist, {m for m, _ in msgs}, completed=False):
+        for tasklist, task in thread_tasks(lists, {m for m, _ in msgs}, completed=False):
             if task.get("status") != "completed":
                 gws("tasks", "tasks", "patch", params={"tasklist": tasklist, "task": task["id"]}, body={"status": "completed"})
                 done.append("task checked")
         done += ["stars removed", "label reviewed"]
     elif frm == "done" and to == "open":
         modify(last, add=[STARRED, YELLOW])
-        for task in thread_tasks(tasklist, {m for m, _ in msgs}, completed=True):
+        for tasklist, task in thread_tasks(lists, {m for m, _ in msgs}, completed=True):
             if task.get("status") == "completed":
                 gws("tasks", "tasks", "patch", params={"tasklist": tasklist, "task": task["id"]},
                     body={"status": "needsAction", "completed": None})

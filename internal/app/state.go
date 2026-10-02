@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -50,11 +51,14 @@ func (a *App) SetState(d *dossier.Dossier, move, note, waitingOn string) (int, e
 	if m.to == dossier.Waiting {
 		d.WaitingOn = waitingOn
 	} else {
-		d.WaitingOn = ""
+		d.WaitingOn, d.WaitUntil = "", ""
 	}
 	line := from + " → " + m.to
 	if waitingOn != "" {
 		line += " · on " + waitingOn
+	}
+	if m.to == dossier.Waiting && d.WaitUntil != "" {
+		line += " · until " + d.WaitUntil
 	}
 	if note != "" {
 		line += " · " + note
@@ -82,6 +86,87 @@ func (a *App) SetState(d *dossier.Dossier, move, note, waitingOn string) (int, e
 		}
 	}
 	return pending, d.Save()
+}
+
+// Wake brings a dossier back to open: reopens it when done, resumes it when
+// waiting. Anything new for a dossier goes through it.
+func (a *App) Wake(d *dossier.Dossier, reason string) (int, error) {
+	switch d.State {
+	case dossier.Done:
+		return a.SetState(d, "reopen", reason, "")
+	case dossier.Waiting:
+		return a.SetState(d, "resume", reason, "")
+	}
+	return 0, nil
+}
+
+// ParseUntil reads the end of a wait: a date (2026-10-09, end of that day), an
+// RFC 3339 instant, a duration in days or hours (7d, 48h), or "none".
+func ParseUntil(s string, now time.Time) (string, error) {
+	s = strings.TrimSpace(strings.ToLower(s))
+	switch {
+	case s == "none" || s == "aucun" || s == "aucune":
+		return "", nil
+	case strings.HasSuffix(s, "d"):
+		if n, err := strconv.Atoi(strings.TrimSuffix(s, "d")); err == nil && n > 0 {
+			return now.AddDate(0, 0, n).Format(time.RFC3339), nil
+		}
+	case strings.HasSuffix(s, "h"):
+		if n, err := strconv.Atoi(strings.TrimSuffix(s, "h")); err == nil && n > 0 {
+			return now.Add(time.Duration(n) * time.Hour).Format(time.RFC3339), nil
+		}
+	}
+	if t, err := time.ParseInLocation("2006-01-02", s, now.Location()); err == nil {
+		return t.Add(24*time.Hour - time.Second).Format(time.RFC3339), nil
+	}
+	if t, err := time.Parse(time.RFC3339, strings.ToUpper(s)); err == nil {
+		return t.Format(time.RFC3339), nil
+	}
+	return "", spec.UserError("--until takes a date (2026-10-09), a duration (7d, 48h) or none; got %q. Example: dossier wait --on \"Baer SA\" --until 7d", s)
+}
+
+// DefaultWait is the store's wait before a chase prompt: [lifecycle] default_wait, 7d otherwise.
+func (a *App) DefaultWait() string {
+	if w := strings.TrimSpace(a.S.Config.Lifecycle.DefaultWait); w != "" {
+		return w
+	}
+	return "7d"
+}
+
+// Deadlines wakes every waiting dossier whose wait_until has passed and asks
+// its session whether to chase.
+func (a *App) Deadlines(now time.Time) IngestReport {
+	rep := IngestReport{Source: "deadlines"}
+	all, _ := a.All()
+	for _, d := range all {
+		if d.State != dossier.Waiting || d.WaitUntil == "" {
+			continue
+		}
+		until, err := time.Parse(time.RFC3339, d.WaitUntil)
+		if err != nil || now.Before(until) {
+			continue
+		}
+		rep.Events++
+		waitingOn, since := d.WaitingOn, d.WaitUntil
+		if _, err := a.Wake(d, "no answer by "+since); err != nil {
+			rep.Errors = append(rep.Errors, d.ID+": "+err.Error())
+			continue
+		}
+		summary := map[string]any{"waiting_on": waitingOn, "until": since}
+		text, err := a.renderPrompt(d, "deadline", "", summary, nil)
+		if err != nil {
+			rep.Errors = append(rep.Errors, d.ID+": "+err.Error())
+			continue
+		}
+		if d.Run.Session != "" {
+			if err := a.sendPrompt(d, text); err != nil {
+				rep.Errors = append(rep.Errors, d.ID+": "+err.Error())
+				continue
+			}
+		}
+		rep.Opened = append(rep.Opened, OpenResult{ID: d.ID, Dir: d.Dir, Outcome: "deadline", Session: d.Run.Session, TabID: d.Run.TabID})
+	}
+	return rep
 }
 
 // reflect calls every source's transition. Failures are kept for `retry`.
@@ -274,8 +359,13 @@ func (a *App) Ingest(names []string, dryRun bool) ([]IngestReport, error) {
 	if len(sources) == 0 {
 		return nil, spec.UserError("no [[source]] declared in %s. Add one, for example name = \"gmail\" with its command", a.S.Meta("config.toml"))
 	}
-	all, _ := a.All()
 	var reports []IngestReport
+	if !dryRun {
+		if dl := a.Deadlines(time.Now()); dl.Events > 0 || len(dl.Errors) > 0 {
+			reports = append(reports, dl)
+		}
+	}
+	all, _ := a.All()
 	for _, src := range sources {
 		rep := IngestReport{Source: src.Name}
 		var watch []string
@@ -309,7 +399,7 @@ func (a *App) Ingest(names []string, dryRun bool) ([]IngestReport, error) {
 		failed := false
 		for _, s := range res.Signals {
 			r, err := a.Open(OpenParams{Title: s.Title, SourceRef: s.SourceRef, ThreadRef: s.ThreadRef, URL: s.URL,
-				Instruction: s.Instruction, Summary: s.Summary, Files: s.Files})
+				Instruction: s.Instruction, Summary: s.Summary, Files: s.Files, Agenda: s.Agenda})
 			if err != nil {
 				rep.Errors = append(rep.Errors, s.SourceRef+": "+err.Error())
 				if r.ID == "" {
@@ -329,16 +419,14 @@ func (a *App) Ingest(names []string, dryRun bool) ([]IngestReport, error) {
 				rep.Skipped = append(rep.Skipped, "event on unknown thread "+e.ThreadRef)
 				continue
 			}
-			if d.State == dossier.Done {
-				if _, err := a.SetState(d, "reopen", "event on "+e.ThreadRef, ""); err != nil {
+			for _, meeting := range e.Agenda {
+				if err := a.addToAgenda(meeting, d.ID); err != nil {
 					rep.Errors = append(rep.Errors, err.Error())
-					continue
 				}
-			} else if d.State == dossier.Waiting {
-				if _, err := a.SetState(d, "resume", "event on "+e.ThreadRef, ""); err != nil {
-					rep.Errors = append(rep.Errors, err.Error())
-					continue
-				}
+			}
+			if _, err := a.Wake(d, "event on "+e.ThreadRef); err != nil {
+				rep.Errors = append(rep.Errors, err.Error())
+				continue
 			}
 			summary := e.Summary
 			if summary == nil {

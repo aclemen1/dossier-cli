@@ -10,6 +10,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/aclemen1/dossier-cli/internal/app"
 	"github.com/aclemen1/dossier-cli/internal/connector"
@@ -59,6 +60,15 @@ func moveAction(name, summary string, effects, examples []string, extra ...spec.
 				d, err := a.Load(ctx.Str("id"))
 				if err != nil {
 					return nil, err
+				}
+				if name == "wait" {
+					until := ctx.Str("until")
+					if until == "" {
+						until = a.DefaultWait()
+					}
+					if d.WaitUntil, err = app.ParseUntil(until, time.Now()); err != nil {
+						return nil, err
+					}
 				}
 				pending, err := a.SetState(d, name, ctx.Str("note"), ctx.Str("on"))
 				if err != nil {
@@ -213,6 +223,8 @@ func init() {
 			{Name: "url", Kind: spec.String, Help: "Link to the original item."},
 			{Name: "file", Kind: spec.StringList, Help: "File copied into context/ (repeatable)."},
 			{Name: "parent", Kind: spec.String, Help: "Parent dossier id."},
+			{Name: "alias", Kind: spec.String, Help: "Name for a lasting dossier, e.g. RDIR for a recurring meeting."},
+			{Name: "agenda", Kind: spec.StringList, Help: "Meeting dossier (alias or id) that includes this one (repeatable)."},
 			{Name: "no-start", Kind: spec.Bool, Help: "Create the dossier without starting its session."},
 		},
 		Effects: []string{
@@ -243,7 +255,8 @@ func init() {
 					files = append(files, connector.File{Name: p, Path: p})
 				}
 				return a.Open(app.OpenParams{Title: ctx.Str("title"), Instruction: instr, SourceRef: ctx.Str("source"),
-					ThreadRef: ctx.Str("thread"), URL: ctx.Str("url"), Files: files, Parent: ctx.Str("parent"), NoStart: ctx.Bool("no-start")})
+					ThreadRef: ctx.Str("thread"), URL: ctx.Str("url"), Files: files, Parent: ctx.Str("parent"), NoStart: ctx.Bool("no-start"),
+					Alias: ctx.Str("alias"), Agenda: ctx.List("agenda")})
 			})
 		},
 		Text: func(w io.Writer, r any) {
@@ -273,13 +286,16 @@ func init() {
 				if x.WaitingOn != "" {
 					extra = " · on " + x.WaitingOn
 				}
+				if len(x.WaitUntil) >= 10 {
+					extra += " until " + x.WaitUntil[:10]
+				}
 				if x.Pending > 0 {
 					extra += fmt.Sprintf(" · %d pending", x.Pending)
 				}
 				if len(x.BlockedBy) > 0 {
 					extra += " · blocked by " + strings.Join(x.BlockedBy, ", ")
 				}
-				fmt.Fprintf(w, "%s  %-8s %-8s %s%s\n", x.ID, x.State, x.Activity, x.Title, extra)
+				fmt.Fprintf(w, "%-8s %-8s %-8s %s%s\n", x.Label, x.State, x.Activity, x.Title, extra)
 			}
 			if len(rows) == 0 {
 				fmt.Fprintln(w, "no dossier")
@@ -302,7 +318,7 @@ func init() {
 		},
 		Text: func(w io.Writer, r any) {
 			s := r.(app.ShowResult)
-			fmt.Fprintf(w, "%s · %s · %s · %s\n", s.ID, s.State, s.Activity, s.Title)
+			fmt.Fprintf(w, "%s · %s · %s · %s\n", s.Label(), s.State, s.Activity, s.Title)
 			if s.WaitingOn != "" {
 				fmt.Fprintf(w, "waiting on %s\n", s.WaitingOn)
 			}
@@ -397,9 +413,11 @@ func init() {
 
 	// ---------------------------------------------------------------- state
 	spec.Register(moveAction("wait", "Mark the dossier as waiting on a third party.",
-		[]string{"Sets state to waiting and waiting_on.", "Calls transition open → waiting on every source (Gmail: purple star).", "Closes the tab when lifecycle.close_tab_on includes waiting."},
-		[]string{`dossier wait D-0042 --on "Baer SA"`, `dossier wait --on "la gérance"`},
+		[]string{"Sets state to waiting, waiting_on and wait_until.", "Calls transition open → waiting on every source (Gmail: purple star).", "Closes the tab when lifecycle.close_tab_on includes waiting.",
+			"When wait_until passes, ingest wakes the dossier and asks its session whether to chase."},
+		[]string{`dossier wait D-0042 --on "Baer SA"`, `dossier wait --on "la gérance" --until 2026-10-15`, `dossier wait D-0042 --on "Baer SA" --until none`},
 		spec.Param{Name: "on", Kind: spec.String, Required: true, Help: "Who the dossier waits for."},
+		spec.Param{Name: "until", Kind: spec.String, Help: "When to chase: a date (2026-10-15), a duration (7d, 48h) or none. Defaults to the store's lifecycle.default_wait (7d)."},
 		spec.Param{Name: "note", Kind: spec.String, Help: "Free note for the history."}))
 	spec.Register(moveAction("resume", "Bring a waiting dossier back to open.",
 		[]string{"Sets state to open.", "Calls transition waiting → open on every source (Gmail: purple star removed)."},
@@ -602,7 +620,11 @@ func init() {
 }
 
 func printTree(w io.Writer, n app.TreeNode, indent string) {
-	label := n.ID + " · " + n.Title + " · " + n.State
+	id := n.Label
+	if id == "" {
+		id = n.ID
+	}
+	label := id + " · " + n.Title + " · " + n.State
 	if n.Rel != "" {
 		label = n.Rel + " → " + label
 	}

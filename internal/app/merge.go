@@ -221,6 +221,27 @@ func (a *App) Merge(fromID, intoID string) (MergeResult, error) {
 	a.syncLinksBlock(into)
 	from.Sources, from.Threads, from.Links = nil, nil, nil
 	a.syncLinksBlock(from)
+	// Links that pointed at `from` now point at `into`.
+	if all, err := a.All(); err == nil {
+		for _, x := range all {
+			if x.ID == from.ID || x.ID == into.ID || !strings.Contains(fmt.Sprint(x.Links), from.ID) {
+				continue
+			}
+			var kept []dossier.Link
+			for _, l := range x.Links {
+				if l.To == from.ID {
+					l.To = into.ID
+				}
+				if !containsLink(kept, l) {
+					kept = append(kept, l)
+				}
+			}
+			x.Links = kept
+			a.syncLinksBlock(x)
+			_ = x.Save()
+			_ = x.Log("links to %s now point at %s (merge)", from.ID, into.ID)
+		}
+	}
 	from.State, from.MergedInto, from.WaitingOn = dossier.Merged, into.ID, ""
 	_ = from.Log("merged into %s (%s)", into.ID, into.Title)
 	if err := from.Save(); err != nil {
@@ -268,4 +289,13 @@ func (a *App) MergedInto(d *dossier.Dossier) []*dossier.Dossier {
 		}
 	}
 	return out
+}
+
+func containsLink(ls []dossier.Link, l dossier.Link) bool {
+	for _, x := range ls {
+		if x == l {
+			return true
+		}
+	}
+	return false
 }

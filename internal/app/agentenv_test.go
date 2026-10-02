@@ -88,7 +88,7 @@ func TestAgentSettingsCarryDenyRulesAndHooks(t *testing.T) {
 	s = nil
 	json.Unmarshal(b, &s)
 	deny := s["permissions"].(map[string]any)["deny"].([]any)
-	if deny[0] != "Bash(dossier:*)" || deny[2] != "Edit(//v/Private/**)" || len(deny) != 5 {
+	if deny[0] != "Bash(dossier:*)" || deny[2] != "Edit(//v/Private/**)" || len(deny) != 3 {
 		t.Fatalf("deny %v", deny)
 	}
 	if _, ok := s["hooks"].(map[string]any)["PreToolUse"]; !ok {

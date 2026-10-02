@@ -60,10 +60,12 @@ type Dossier struct {
 	Dir         string   `json:"dir"`
 	ID          string   `json:"id"`
 	Title       string   `json:"title"`
+	Alias       string   `json:"alias,omitempty"`
 	Description string   `json:"description,omitempty"`
 	Resource    string   `json:"resource,omitempty"`
 	State       string   `json:"state"`
 	WaitingOn   string   `json:"waiting_on,omitempty"`
+	WaitUntil   string   `json:"wait_until,omitempty"`
 	Parent      string   `json:"parent,omitempty"`
 	MergedInto  string   `json:"merged_into,omitempty"`
 	Sources     []Source `json:"sources"`
@@ -84,6 +86,15 @@ func (d *Dossier) Path(parts ...string) string {
 }
 
 func (d *Dossier) Num() int { return store.NumberOf(d.Dir) }
+
+// Label is how people name the dossier: U-RDIR when it has an alias, its id otherwise.
+func (d *Dossier) Label() string {
+	if d.Alias == "" {
+		return d.ID
+	}
+	prefix, _, _ := strings.Cut(d.ID, "-")
+	return prefix + "-" + d.Alias
+}
 
 func Create(dir, id, title string) *Dossier {
 	now := Now()
@@ -112,10 +123,12 @@ func Load(dir string) (*Dossier, error) {
 	var f struct {
 		ID          string   `yaml:"id"`
 		Title       string   `yaml:"title"`
+		Alias       string   `yaml:"alias"`
 		Description string   `yaml:"description"`
 		Resource    string   `yaml:"resource"`
 		State       string   `yaml:"state"`
 		WaitingOn   string   `yaml:"waiting_on"`
+		WaitUntil   string   `yaml:"wait_until"`
 		Parent      string   `yaml:"parent"`
 		MergedInto  string   `yaml:"merged_into"`
 		Sources     []Source `yaml:"sources"`
@@ -128,8 +141,8 @@ func Load(dir string) (*Dossier, error) {
 		return nil, fmt.Errorf("%s/dossier.md frontmatter: %w", dir, err)
 	}
 	d := &Dossier{
-		Dir: dir, ID: f.ID, Title: f.Title, Description: f.Description, Resource: f.Resource,
-		State: f.State, WaitingOn: f.WaitingOn, Parent: f.Parent, MergedInto: f.MergedInto,
+		Dir: dir, ID: f.ID, Title: f.Title, Alias: f.Alias, Description: f.Description, Resource: f.Resource,
+		State: f.State, WaitingOn: f.WaitingOn, WaitUntil: f.WaitUntil, Parent: f.Parent, MergedInto: f.MergedInto,
 		Sources: f.Sources, Threads: f.Threads, Links: f.Links, Created: f.Created, Updated: f.Timestamp,
 		doc: mapping, body: body,
 	}
@@ -167,10 +180,12 @@ func (d *Dossier) Save() error {
 	set("type", "Dossier")
 	set("id", d.ID)
 	set("title", d.Title)
+	set("alias", d.Alias)
 	set("description", d.Description)
 	set("resource", d.Resource)
 	set("state", d.State)
 	set("waiting_on", d.WaitingOn)
+	set("wait_until", d.WaitUntil)
 	set("parent", d.Parent)
 	set("merged_into", d.MergedInto)
 	set("sources", d.Sources)

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"strings"
 
 	"github.com/aclemen1/dossier-cli/internal/app"
@@ -34,10 +35,33 @@ var tools = []tool{
 	{name: "close", action: "close", self: []string{"id"}, description: "Close this dossier once the user says it is settled."},
 	{name: "open", action: "open", self: []string{"parent"}, hide: []string{"source", "thread", "url"},
 		description: "Open a new dossier that grows out of this one (it records this dossier as parent)."},
-	{name: "link", action: "link", self: []string{"from"}, description: "Link this dossier to another: includes (agenda item) or depends_on (waits for)."},
-	{name: "unlink", action: "unlink", self: []string{"from"}, description: "Remove links from this dossier to another."},
+	{name: "link", action: "link", description: "Link this dossier, or one it opened, to another: includes (agenda item) or depends_on (waits for). from defaults to this dossier.",
+		check: fromSelfOrChild},
+	{name: "unlink", action: "unlink", description: "Remove links from this dossier, or one it opened, to another. from defaults to this dossier.",
+		check: fromSelfOrChild},
+	{name: "track", action: "track", self: []string{"id"},
+		description: "Attach a thread to this dossier as a source, e.g. the thread of a draft you just wrote: its replies come back here, and its star follows the dossier's state."},
 	{name: "merge", action: "merge", self: []string{"from"}, description: "Merge this dossier into another one, after the user agreed."},
 	{name: "notify", action: "notify", self: []string{"from"}, description: "Tell a dossier that this one includes what was decided."},
+}
+
+// fromSelfOrChild lets a session link from its own dossier or from a dossier it
+// opened (parent = this dossier).
+func fromSelfOrChild(a *app.App, self string, args map[string]any) error {
+	from, _ := args["from"].(string)
+	if from == "" {
+		args["from"] = self
+		return nil
+	}
+	d, err := a.Load(from)
+	if err != nil {
+		return err
+	}
+	if d.ID == self || d.Parent == self {
+		args["from"] = d.ID
+		return nil
+	}
+	return spec.UserError("links start from this dossier (%s) or from a dossier it opened; %s is neither", self, d.ID)
 }
 
 func grepScope(a *app.App, self string, args map[string]any) error {
@@ -94,7 +118,7 @@ func (t tool) schema() map[string]any {
 			prop["default"] = p.Default
 		}
 		props[name] = prop
-		if p.Required && !(t.check != nil && p.Name == "id") {
+		if p.Required && !(t.check != nil && (p.Name == "id" || p.Name == "from")) {
 			required = append(required, name)
 		}
 	}
@@ -156,11 +180,55 @@ func (t tool) call(self string, in map[string]any) (any, error) {
 			}
 		}
 	}
+	if _, err := spec.Parse(a, argv); err != nil {
+		return nil, err
+	}
+	return runAction(t.action, argv)
+}
+
+// runAction executes a tool call. Tests run it in process.
+var runAction = runInstalled
+
+func runInProcess(action string, argv []string) (any, error) {
+	a := spec.FindVerb(action)
 	parsed, err := spec.Parse(a, argv)
 	if err != nil {
 		return nil, err
 	}
 	return a.Run(&spec.Context{Args: parsed, Store: os.Getenv("DOSSIER_STORE"), Format: "json", Stdin: strings.NewReader("")})
+}
+
+// runInstalled runs the action with the dossier binary installed now, not the
+// one this long-lived server was started from: an update reaches running
+// sessions without a restart. Only the tool list itself stays as it was.
+func runInstalled(action string, argv []string) (any, error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return nil, err
+	}
+	cmd := exec.Command(exe, append([]string{action}, append(argv, "--format", "json")...)...)
+	cmd.Env = os.Environ()
+	cmd.Stdin = strings.NewReader("")
+	out, runErr := cmd.Output()
+	var env struct {
+		OK     bool            `json:"ok"`
+		Result json.RawMessage `json:"result"`
+		Error  *spec.Error     `json:"error"`
+	}
+	if err := json.Unmarshal(out, &env); err != nil {
+		return nil, fmt.Errorf("dossier %s did not answer with an envelope (%v): %s", action, runErr, strings.TrimSpace(string(out)))
+	}
+	if !env.OK {
+		if env.Error != nil {
+			return nil, env.Error
+		}
+		return nil, fmt.Errorf("dossier %s failed", action)
+	}
+	var result any
+	if len(env.Result) > 0 {
+		_ = json.Unmarshal(env.Result, &result)
+	}
+	return result, nil
 }
 
 const mcpInstructions = "Tools of the dossier this session works on. They act on this dossier only, " +

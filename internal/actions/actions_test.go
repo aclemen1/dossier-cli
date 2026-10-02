@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/aclemen1/dossier-cli/internal/app"
 	"github.com/aclemen1/dossier-cli/internal/spec"
@@ -17,6 +18,7 @@ import (
 
 func TestMain(m *testing.M) {
 	testutil.Dispatch()
+	runAction = runInProcess
 	os.Exit(m.Run())
 }
 
@@ -200,5 +202,55 @@ func TestEveryActionHasExamplesAndSummary(t *testing.T) {
 		if a.Summary == "" || len(a.Examples) == 0 {
 			t.Errorf("%s %s needs a summary and an example", a.Category, a.Name)
 		}
+	}
+}
+
+func TestMCPLinksFromThisDossierOrOneItOpened(t *testing.T) {
+	a := storeWith(t, "Limite de connexions", "Autre", "Accord")
+	c := startMCP(t)
+	c.rpc(t, "initialize", map[string]any{})
+	if env, isErr := c.call(t, "open", map[string]any{"title": "Touch Base CI", "no-start": true}); isErr {
+		t.Fatalf("open %v", env)
+	}
+	if env, isErr := c.call(t, "link", map[string]any{"from": "D-0004", "to": "D-0001", "rel": "includes"}); isErr {
+		t.Fatalf("link from child: %v", env)
+	}
+	child, _ := a.Load("4")
+	if !child.HasLink("includes", "D-0001") {
+		t.Fatalf("child links %v", child.Links)
+	}
+	if env, isErr := c.call(t, "link", map[string]any{"to": "D-0003", "rel": "depends_on"}); isErr {
+		t.Fatalf("link from self: %v", env)
+	}
+	env, isErr := c.call(t, "link", map[string]any{"from": "D-0002", "to": "D-0003", "rel": "includes"})
+	if !isErr || !strings.Contains(env["error"].(map[string]any)["message"].(string), "neither") {
+		t.Fatalf("link from a foreign dossier: %v", env)
+	}
+}
+
+func TestMCPWaitUsesTheDefaultDelayAndNotifyWakes(t *testing.T) {
+	a := storeWith(t, "Séance", "Point")
+	c := startMCP(t)
+	c.rpc(t, "initialize", map[string]any{})
+	if env, isErr := c.call(t, "wait", map[string]any{"on": "JMR"}); isErr {
+		t.Fatalf("wait %v", env)
+	}
+	d, _ := a.Load("1")
+	until, err := time.Parse(time.RFC3339, d.WaitUntil)
+	if err != nil || until.Sub(time.Now()) < 6*24*time.Hour || until.Sub(time.Now()) > 8*24*time.Hour {
+		t.Fatalf("wait_until %q", d.WaitUntil)
+	}
+	if env, isErr := c.call(t, "wait", map[string]any{"on": "x", "until": "bientôt"}); !isErr {
+		t.Fatalf("bad until accepted: %v", env)
+	}
+	pt, _ := a.Load("2")
+	a.SetState(pt, "wait", "", "Baer SA")
+	c.call(t, "resume", map[string]any{})
+	c.call(t, "link", map[string]any{"to": "D-0002", "rel": "includes"})
+	if env, isErr := c.call(t, "notify", map[string]any{"to": "D-0002", "text": "Décidé en séance."}); isErr {
+		t.Fatalf("notify %v", env)
+	}
+	if pt, _ := a.Load("2"); pt.State != "open" {
+		t.Fatalf("notify left the point %s", pt.State)
 	}
 }

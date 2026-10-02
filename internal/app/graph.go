@@ -226,6 +226,7 @@ func BlockedBy(d *dossier.Dossier, idx map[string]*dossier.Dossier) []string {
 type TreeNode struct {
 	Rel       string     `json:"rel,omitempty"`
 	ID        string     `json:"id"`
+	Label     string     `json:"label"`
 	Title     string     `json:"title"`
 	State     string     `json:"state"`
 	BlockedBy []string   `json:"blocked_by,omitempty"`
@@ -237,7 +238,7 @@ func (a *App) Tree(d *dossier.Dossier, rel string, depth int) TreeNode {
 	idx := a.index()
 	var walk func(x *dossier.Dossier, via string, level int, path map[string]bool) TreeNode
 	walk = func(x *dossier.Dossier, via string, level int, path map[string]bool) TreeNode {
-		n := TreeNode{Rel: via, ID: x.ID, Title: x.Title, State: x.State, BlockedBy: BlockedBy(x, idx)}
+		n := TreeNode{Rel: via, ID: x.ID, Label: x.Label(), Title: x.Title, State: x.State, BlockedBy: BlockedBy(x, idx)}
 		if path[x.ID] {
 			n.Seen = true
 			return n

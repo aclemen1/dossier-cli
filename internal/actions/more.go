@@ -90,10 +90,76 @@ func init() {
 				}
 				text := fmt.Sprintf("From dossier %s (%s): %s", from.ID, from.Title, ctx.Str("text"))
 				_ = to.Log("from %s: %s", from.ID, ctx.Str("text"))
+				if _, err := a.Wake(to, "notified by "+from.ID); err != nil {
+					return nil, err
+				}
 				if to.Run.Session == "" {
 					return map[string]any{"to": to.ID, "prompted": false}, to.Save()
 				}
 				return map[string]any{"to": to.ID, "prompted": true}, a.Prompt(to, text)
+			})
+		},
+	})
+
+	spec.Register(&spec.Action{
+		Category: "dossier", Name: "track", Summary: "Attach a source thread to a dossier (a draft's thread, a related conversation).",
+		Discussion: "The reference is <source>:<kind>/<id>, as connectors write it, e.g. gmail:thread/1a0d7b2f4c0fff93. " +
+			"Its new messages become events of the dossier, and source transitions (stars) apply to it.",
+		Params: []spec.Param{
+			idParam("Dossier id. Defaults to DOSSIER_ID."),
+			{Name: "ref", Kind: spec.String, Positional: true, Required: true, Help: "Source reference, e.g. gmail:thread/<threadId>."},
+		},
+		Effects:  []string{"Adds the reference to sources and threads in dossier.md; the next transition reaches it too."},
+		Examples: []string{"dossier track U-0002 gmail:thread/1a0d7b2f4c0fff93"},
+		Run: func(ctx *spec.Context) (any, error) {
+			return withApp(ctx, true, func(a *app.App) (any, error) { return a.Track(ctx.Str("id"), ctx.Str("ref")) })
+		},
+	})
+
+	spec.Register(&spec.Action{
+		Category: "dossier", Name: "restart", Summary: "Restart a dossier's session: same conversation, fresh process, tools and environment.",
+		Params:   []spec.Param{idParam("Dossier id.")},
+		Effects:  []string{"Closes the tab (the agent exits), then resumes the session in a new tab with --resume."},
+		Examples: []string{"dossier restart U-0002"},
+		Run: func(ctx *spec.Context) (any, error) {
+			return withApp(ctx, true, func(a *app.App) (any, error) {
+				d, err := a.Load(ctx.Str("id"))
+				if err != nil {
+					return nil, err
+				}
+				if err := a.Restart(d); err != nil {
+					return nil, err
+				}
+				return map[string]any{"id": d.ID, "session": d.Run.Session, "tab_id": d.Run.TabID}, nil
+			})
+		},
+	})
+
+	spec.Register(&spec.Action{
+		Category: "dossier", Name: "alias", Summary: "Name a lasting dossier (a recurring meeting): RDIR, then U-RDIR, works wherever an id does.",
+		Params: []spec.Param{
+			idParam("Dossier id."),
+			{Name: "name", Kind: spec.String, Positional: true, Help: "Alias, e.g. RDIR. Omit with --clear."},
+			{Name: "clear", Kind: spec.Bool, Help: "Remove the alias."},
+		},
+		Effects:  []string{"Writes alias in dossier.md and renames the tab; the number stays the reference in links."},
+		Examples: []string{"dossier alias U-0006 RDIR", "dossier alias U-RDIR --clear"},
+		Run: func(ctx *spec.Context) (any, error) {
+			return withApp(ctx, true, func(a *app.App) (any, error) {
+				d, err := a.Load(ctx.Str("id"))
+				if err != nil {
+					return nil, err
+				}
+				name := ctx.Str("name")
+				if ctx.Bool("clear") {
+					name = ""
+				} else if name == "" {
+					return nil, spec.UserError("give an alias or --clear. Example: dossier alias %s RDIR", d.ID)
+				}
+				if err := a.SetAlias(d, name); err != nil {
+					return nil, err
+				}
+				return map[string]any{"id": d.ID, "alias": d.Alias, "label": d.Label()}, nil
 			})
 		},
 	})
