@@ -298,7 +298,7 @@ func (m *model) key(k string) tea.Cmd {
 		return run(r.store.root, r.d.ID, "attach")
 	case "+":
 		m.newDossier(r)
-	case "W", "u", "x":
+	case "W", "u", "x", "D":
 		if r != nil {
 			return m.stateKey(k, r)
 		}
@@ -505,7 +505,7 @@ func (m *model) bottomBar() string {
 		}
 		return strings.Join(parts, sFaint.Render("  ·  "))
 	}
-	line := keyLine([][2]string{{"+", "new"}, {"enter", "pane"}, {"W", "wait"}, {"u", "resume"}, {"x", "close"}, {"n", "no action"},
+	line := keyLine([][2]string{{"+", "new"}, {"enter", "pane"}, {"W", "wait"}, {"u", "resume"}, {"x", "close"}, {"D", "delete"}, {"n", "no action"},
 		{"s", "start"}, {"o", "start + prompt"}, {"R", "restart"}}) + "\n" +
 		keyLine([][2]string{{"↑↓", "move"}, {"J K", "scroll"}, {"i", "ingest now"}, {"t", "to do"}, {"w", "by person"}, {"a", "all"},
 			{"p", "priority"}, {"/", "filter"}, {"tab", "detail"}, {"q", "quit"}})

@@ -97,6 +97,16 @@ func (m *model) stateKey(k string, r *row) tea.Cmd {
 			return run(root, d.ID, "reopen")
 		}
 		m.status, m.statusErr = d.Label()+" is "+d.State+": u resumes a waiting dossier or reopens a closed one", true
+	case "D":
+		m.ask = &ask{title: "Delete " + d.Label() + " · " + truncate(d.Title, 40), fields: []askField{
+			{label: "type " + d.Label() + " to confirm", hint: "its signal is withdrawn, its directory goes to the Trash"},
+		}, done: func(v []string) tea.Cmd {
+			if !strings.EqualFold(v[0], d.Label()) && !strings.EqualFold(v[0], d.ID) {
+				m.status, m.statusErr = d.Label()+" kept", false
+				return nil
+			}
+			return run(root, d.ID, "delete")
+		}}
 	case "x":
 		if d.State == dossier.Done || d.State == dossier.Merged {
 			m.status, m.statusErr = d.Label()+" is already "+d.State, true

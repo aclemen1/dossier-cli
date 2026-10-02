@@ -158,12 +158,33 @@ func (r Runner) Poll(cursor string, watch []string, opt PollOptions) (PollResult
 	return p, err
 }
 
-func (r Runner) Transition(sourceRef, threadRef, from, to, note string) error {
+// Dossier names the dossier a call is about, for connectors that tell the
+// user (a chat bot answering "→ D-0042").
+type Dossier struct {
+	ID        string `json:"id"`
+	Title     string `json:"title"`
+	WaitingOn string `json:"waiting_on,omitempty"`
+}
+
+func (r Runner) Transition(sourceRef, threadRef, from, to, note string, d Dossier) error {
 	var out struct {
 		OK bool `json:"ok"`
 	}
 	return r.run("transition", map[string]any{
 		"config": r.Source.Config, "source_ref": sourceRef, "thread_ref": threadRef,
-		"from": from, "to": to, "note": note,
+		"from": from, "to": to, "note": note, "dossier": d,
+	}, &out)
+}
+
+// Opened tells the connector which dossier a signal opened or reached
+// (outcome: created, reopened, routed, existing). Optional verb: call it only
+// when describe lists "opened".
+func (r Runner) Opened(sourceRef, threadRef, outcome string, d Dossier) error {
+	var out struct {
+		OK bool `json:"ok"`
+	}
+	return r.run("opened", map[string]any{
+		"config": r.Source.Config, "source_ref": sourceRef, "thread_ref": threadRef,
+		"outcome": outcome, "dossier": d,
 	}, &out)
 }

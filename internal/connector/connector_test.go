@@ -82,7 +82,7 @@ func TestFailuresAreNeverSilent(t *testing.T) {
 
 func TestTransition(t *testing.T) {
 	r, log := runner(t, "ok", "")
-	if err := r.Transition("fake:task/1", "fake:thread/t", "open", "done", "note"); err != nil {
+	if err := r.Transition("fake:task/1", "fake:thread/t", "open", "done", "note", Dossier{ID: "D-0001"}); err != nil {
 		t.Fatal(err)
 	}
 	in := testutil.Calls(log)[0]["input"].(map[string]any)
@@ -90,7 +90,7 @@ func TestTransition(t *testing.T) {
 		t.Fatalf("transition input %+v", in)
 	}
 	r, _ = runner(t, "fail-transition", "")
-	if err := r.Transition("fake:task/1", "", "open", "done", ""); err == nil || !strings.Contains(err.Error(), "gmail unavailable") {
+	if err := r.Transition("fake:task/1", "", "open", "done", "", Dossier{ID: "D-0001"}); err == nil || !strings.Contains(err.Error(), "gmail unavailable") {
 		t.Fatalf("got %v", err)
 	}
 }

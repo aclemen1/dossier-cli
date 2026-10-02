@@ -235,7 +235,7 @@ func (a *App) reflect(d *dossier.Dossier, from, to, note string) int {
 			d.Run.PendingTransitions = append(d.Run.PendingTransitions, t)
 			continue
 		}
-		if err := (connector.Runner{Store: a.S, Source: cfg}).Transition(t.SourceRef, t.ThreadRef, from, to, note); err != nil {
+		if err := (connector.Runner{Store: a.S, Source: cfg}).Transition(t.SourceRef, t.ThreadRef, from, to, note, connector.Dossier{ID: d.ID, Title: d.Title, WaitingOn: d.WaitingOn}); err != nil {
 			t.Error = err.Error()
 			d.Run.PendingTransitions = append(d.Run.PendingTransitions, t)
 			_ = d.Log("source %s: %s → %s pending (%s)", name, from, to, firstLine(err.Error()))
@@ -260,7 +260,7 @@ func (a *App) Retry(d *dossier.Dossier) int {
 	for _, t := range todo {
 		cfg, ok := a.S.Config.Source(t.Source)
 		if ok {
-			if err := (connector.Runner{Store: a.S, Source: cfg}).Transition(t.SourceRef, t.ThreadRef, t.From, t.To, t.Note); err == nil {
+			if err := (connector.Runner{Store: a.S, Source: cfg}).Transition(t.SourceRef, t.ThreadRef, t.From, t.To, t.Note, connector.Dossier{ID: d.ID, Title: d.Title}); err == nil {
 				_ = d.Log("source %s: %s → %s delivered on retry", t.Source, t.From, t.To)
 				continue
 			} else {
@@ -450,6 +450,26 @@ func (a *App) Ingest(names []string, opt connector.PollOptions) ([]IngestReport,
 			continue
 		}
 		failed := false
+		runner := connector.Runner{Store: a.S, Source: src}
+		var tells *bool
+		// tell says to a connector that declares "opened" which dossier an item reached.
+		tell := func(sourceRef, threadRef, outcome, id string) {
+			if tells == nil {
+				d, err := runner.Describe()
+				v := err == nil && contains(d.Verbs, "opened")
+				tells = &v
+			}
+			if !*tells {
+				return
+			}
+			title := ""
+			if d, err := a.Load(id); err == nil {
+				title = d.Title
+			}
+			if err := runner.Opened(sourceRef, threadRef, outcome, connector.Dossier{ID: id, Title: title}); err != nil {
+				rep.Errors = append(rep.Errors, sourceRef+": opened: "+err.Error())
+			}
+		}
 		for _, s := range res.Signals {
 			r, err := a.Open(OpenParams{Title: s.Title, SourceRef: s.SourceRef, ThreadRef: s.ThreadRef, URL: s.URL,
 				Instruction: s.Instruction, Summary: s.Summary, Files: s.Files, In: s.In})
@@ -465,6 +485,7 @@ func (a *App) Ingest(names []string, opt connector.PollOptions) ([]IngestReport,
 				continue
 			}
 			rep.Opened = append(rep.Opened, r)
+			tell(s.SourceRef, s.ThreadRef, r.Outcome, r.ID)
 		}
 		for _, e := range res.Events {
 			d := a.FindByThread(e.ThreadRef)
@@ -493,6 +514,7 @@ func (a *App) Ingest(names []string, opt connector.PollOptions) ([]IngestReport,
 			}
 			r.Outcome = "event"
 			rep.Opened = append(rep.Opened, r)
+			tell(e.ThreadRef, e.ThreadRef, "event", d.ID)
 		}
 		if !failed && res.Cursor != "" {
 			if err := a.saveCursor(src.Name, res.Cursor); err != nil {
@@ -524,4 +546,13 @@ func sourceNames(s []store.SourceConfig) string {
 		return "none"
 	}
 	return strings.Join(n, ", ")
+}
+
+func contains(l []string, s string) bool {
+	for _, x := range l {
+		if x == s {
+			return true
+		}
+	}
+	return false
 }

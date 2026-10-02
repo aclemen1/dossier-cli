@@ -431,6 +431,37 @@ func init() {
 	})
 
 	// ---------------------------------------------------------------- state
+	spec.Register(&spec.Action{
+		Category: "dossier", Name: "delete", Summary: "Delete a dossier: withdraw its signal, close its tab, drop the links to it, remove its directory.",
+		Discussion: "For a dossier that should not exist (a test, a mistake). An affair that is settled gets `close` instead. " +
+			"On macOS the directory goes to the Trash; elsewhere it is erased.",
+		Params: []spec.Param{idParam("Dossier id. Defaults to DOSSIER_ID."),
+			{Name: "note", Kind: spec.String, Help: "Why, passed to the sources with the withdrawal."}},
+		Effects: []string{"Calls transition → done on every source (Gmail: star removed; Reminders: completed), and stops when one fails.",
+			"Closes the session's tab and removes every link another dossier holds to it.",
+			"Moves the directory to ~/.Trash on macOS; erases it elsewhere."},
+		Examples: []string{"dossier delete D-0042", `dossier delete D-0042 --note "essai"`},
+		Run: func(ctx *spec.Context) (any, error) {
+			return withApp(ctx, true, func(a *app.App) (any, error) {
+				d, err := a.Load(ctx.Str("id"))
+				if err != nil {
+					return nil, err
+				}
+				return a.Delete(d, ctx.Str("note"))
+			})
+		},
+		Text: func(w io.Writer, r any) {
+			res := r.(app.DeleteResult)
+			fmt.Fprintf(w, "%s deleted", res.ID)
+			if res.Trash != "" {
+				fmt.Fprintf(w, " · in the Trash: %s", res.Trash)
+			}
+			if len(res.Unlinked) > 0 {
+				fmt.Fprintf(w, " · links removed from %s", strings.Join(res.Unlinked, ", "))
+			}
+			fmt.Fprintln(w)
+		},
+	})
 	for _, v := range []struct {
 		name, summary string
 		effects       []string

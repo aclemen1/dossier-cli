@@ -32,6 +32,7 @@ var tools = []tool{
 	{name: "park", action: "park", self: []string{"id"}, description: "Mark a dossier as needing no action from the user for now, e.g. an item to raise at the next meeting. Anything new on it clears the mark."},
 	{name: "unpark", action: "unpark", self: []string{"id"}, description: "Mark a dossier as needing action from the user again."},
 	{name: "close", action: "close", self: []string{"id"}, description: "Close a dossier once the user says it is settled."},
+	{name: "delete", action: "delete", self: []string{"id"}, description: "Delete a dossier that should not exist (a test, a mistake), after the user asked: its signal is withdrawn and its directory removed. A settled affair gets close instead."},
 	{name: "open", action: "open", self: []string{"in"}, hide: []string{"source", "thread", "url"},
 		description: "Open a new dossier. By default this dossier includes it (an item of this meeting, a side affair); pass in = [] for a dossier on its own, or other dossiers that include it."},
 	{name: "link", action: "link", self: []string{"from"}, description: "Link a dossier to another: includes (part of it) or depends_on (waits for)."},
