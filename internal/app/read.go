@@ -71,6 +71,10 @@ func (a *App) List(status, in string) ([]Row, error) {
 			if d.State != dossier.Open && d.State != dossier.Waiting {
 				continue
 			}
+		case "todo":
+			if d.State != dossier.Open || d.NoAction {
+				continue
+			}
 		case "all":
 		default:
 			if d.State != status {

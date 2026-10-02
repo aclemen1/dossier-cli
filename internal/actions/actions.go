@@ -281,10 +281,10 @@ func init() {
 	spec.Register(&spec.Action{
 		Category: "dossier", Name: "ls", Summary: "List dossiers with their state and what their agent is doing.",
 		Params: []spec.Param{
-			{Name: "status", Kind: spec.String, Default: "active", Enum: []string{"active", "open", "waiting", "done", "merged", "all"}, Help: "active = open and waiting."},
+			{Name: "status", Kind: spec.String, Default: "active", Enum: []string{"active", "todo", "open", "waiting", "done", "merged", "all"}, Help: "active = open and waiting; todo = open and needing action (not parked)."},
 			{Name: "in", Kind: spec.String, Help: "Only the dossiers this one includes."},
 		},
-		Examples: []string{"dossier ls", "dossier ls --status waiting", "dossier ls --status all --format text"},
+		Examples: []string{"dossier ls", "dossier ls --status todo", "dossier ls --status waiting", "dossier ls --status all --format text"},
 		Run: func(ctx *spec.Context) (any, error) {
 			return withApp(ctx, false, func(a *app.App) (any, error) { return a.List(ctx.Str("status"), ctx.Str("in")) })
 		},

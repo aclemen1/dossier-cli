@@ -61,15 +61,22 @@ func isStore(p string) bool {
 	return err == nil && !fi.IsDir()
 }
 
-func shown(d *dossier.Dossier, all bool, filter string) bool {
-	if !all && d.State != dossier.Open && d.State != dossier.Waiting {
-		return false
+func shown(d *dossier.Dossier, v view) bool {
+	switch {
+	case v.todo:
+		if d.State != dossier.Open || d.NoAction {
+			return false
+		}
+	case !v.all:
+		if d.State != dossier.Open && d.State != dossier.Waiting {
+			return false
+		}
 	}
-	if filter == "" {
+	if v.filter == "" {
 		return true
 	}
 	hay := strings.ToLower(d.ID + " " + d.Alias + " " + d.Title + " " + d.WaitingOn)
-	return strings.Contains(hay, strings.ToLower(filter))
+	return strings.Contains(hay, strings.ToLower(v.filter))
 }
 
 // load reads every store. byPerson lays the waiting dossiers out by whom they
@@ -77,6 +84,7 @@ func shown(d *dossier.Dossier, all bool, filter string) bool {
 // view says what load shows and in which order.
 type view struct {
 	all        bool   // every state, not only open and waiting
+	todo       bool   // only open dossiers that need action
 	filter     string // substring of id, alias, title or whom it waits on
 	byPerson   bool   // waiting dossiers grouped by whom they wait on
 	byPriority bool   // what needs you first, instead of by number
@@ -137,7 +145,7 @@ func waitingRows(stores []*storeView, filter string) []row {
 	byName := map[string]*group{}
 	for _, sv := range stores {
 		for _, d := range sv.all {
-			if d.State != dossier.Waiting || !shown(d, false, filter) {
+			if d.State != dossier.Waiting || !shown(d, view{filter: filter}) {
 				continue
 			}
 			name := PersonOf(d.WaitingOn)
@@ -197,7 +205,7 @@ func PersonOf(on string) string {
 func treeRows(sv *storeView, ds []*dossier.Dossier, live map[string]string, v view) []row {
 	visible := map[string]bool{}
 	for _, d := range ds {
-		if shown(d, v.all, v.filter) {
+		if shown(d, v) {
 			visible[d.ID] = true
 		}
 	}
