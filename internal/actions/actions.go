@@ -298,6 +298,9 @@ func init() {
 				if len(x.WaitUntil) >= 10 {
 					extra += " until " + x.WaitUntil[:10]
 				}
+				if x.NoAction {
+					extra += " · no action"
+				}
 				if x.Pending > 0 {
 					extra += fmt.Sprintf(" · %d pending", x.Pending)
 				}
@@ -426,6 +429,38 @@ func init() {
 	})
 
 	// ---------------------------------------------------------------- state
+	for _, v := range []struct {
+		name, summary string
+		effects       []string
+		run           func(*app.App, *dossier.Dossier, string) error
+	}{
+		{"park", "Mark an open dossier as needing no action from you for now.",
+			[]string{"Sets no_action: true; the state stays open and the sources see no transition.",
+				"Anything new clears it: an event, a prompt, a state change. `dossier unpark` clears it by hand."},
+			(*app.App).Park},
+		{"unpark", "Mark a dossier as needing action again.",
+			[]string{"Removes no_action."},
+			(*app.App).Unpark},
+	} {
+		spec.Register(&spec.Action{
+			Category: "state", Name: v.name, Summary: v.summary, Effects: v.effects,
+			Params: []spec.Param{idParam("Dossier id. Defaults to DOSSIER_ID."),
+				{Name: "note", Kind: spec.String, Help: "Why, kept in the history."}},
+			Examples: []string{"dossier " + v.name + " D-0042", `dossier ` + v.name + ` D-0042 --note "à évoquer à la prochaine séance"`},
+			Run: func(ctx *spec.Context) (any, error) {
+				return withApp(ctx, true, func(a *app.App) (any, error) {
+					d, err := a.Load(ctx.Str("id"))
+					if err != nil {
+						return nil, err
+					}
+					if err := v.run(a, d, ctx.Str("note")); err != nil {
+						return nil, err
+					}
+					return map[string]any{"id": d.ID, "state": d.State, "no_action": d.NoAction}, nil
+				})
+			},
+		})
+	}
 	spec.Register(moveAction("wait", "Mark the dossier as waiting on a third party.",
 		[]string{"Sets state to waiting, waiting_on and wait_until.", "On a waiting dossier, corrects waiting_on, and wait_until when --until is given; no source transition.", "Calls transition open → waiting on every source (Gmail: purple star).", "Closes the tab when lifecycle.close_tab_on includes waiting.",
 			"When wait_until passes, ingest wakes the dossier and asks its session whether to chase."},

@@ -96,3 +96,29 @@ func TestDisabledPluginsReachTheAgentSettings(t *testing.T) {
 		t.Fatalf("settings %s", b)
 	}
 }
+
+func TestParkHoldsUntilSomethingNewArrives(t *testing.T) {
+	f := newFixture(t)
+	f.a.Open(OpenParams{Title: "Point", NoStart: true})
+	d, _ := f.a.Load("1")
+	if err := f.a.Park(d, "à évoquer en séance"); err != nil {
+		t.Fatal(err)
+	}
+	if d, _ = f.a.Load("1"); !d.NoAction {
+		t.Fatal("park did not stick")
+	}
+	if _, err := f.a.event(d, "Nouvelle réponse", nil, nil, true); err != nil {
+		t.Fatal(err)
+	}
+	if d, _ = f.a.Load("1"); d.NoAction {
+		t.Fatal("an event should clear no_action")
+	}
+	f.a.Park(d, "")
+	f.a.SetState(d, "wait", "", "Patricia")
+	if d, _ = f.a.Load("1"); d.NoAction {
+		t.Fatal("a state change should clear no_action")
+	}
+	if err := f.a.Park(d, ""); err == nil {
+		t.Fatal("park accepted a waiting dossier")
+	}
+}

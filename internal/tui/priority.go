@@ -11,6 +11,7 @@ const (
 	rankYourTurn = iota // the agent finished its turn or asks a permission
 	rankChaseDue        // a wait whose chase date is today or past
 	rankOpen            // open, oldest update first
+	rankNoAction        // open, marked as needing no action for now
 	rankWaiting         // a wait still to come, soonest chase first
 	rankClosed
 )
@@ -42,8 +43,13 @@ func urgencyOf(d *dossier.Dossier, activity string, now time.Time) urgency {
 		}
 		return urgency{rankWaiting, untilKey(d)}
 	}
+	if parked(d) {
+		return urgency{rankNoAction, utc(d.Updated)}
+	}
 	return urgency{rankOpen, utc(d.Updated)}
 }
+
+func parked(d *dossier.Dossier) bool { return d.State == dossier.Open && d.NoAction }
 
 func utc(ts string) string {
 	if t, err := time.Parse(time.RFC3339, ts); err == nil {

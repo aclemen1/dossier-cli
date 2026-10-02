@@ -66,6 +66,7 @@ type Dossier struct {
 	State       string   `json:"state"`
 	WaitingOn   string   `json:"waiting_on,omitempty"`
 	WaitUntil   string   `json:"wait_until,omitempty"`
+	NoAction    bool     `json:"no_action,omitempty"`
 	MergedInto  string   `json:"merged_into,omitempty"`
 	Sources     []Source `json:"sources"`
 	Threads     []string `json:"threads"`
@@ -128,6 +129,7 @@ func Load(dir string) (*Dossier, error) {
 		State       string   `yaml:"state"`
 		WaitingOn   string   `yaml:"waiting_on"`
 		WaitUntil   string   `yaml:"wait_until"`
+		NoAction    bool     `yaml:"no_action"`
 		MergedInto  string   `yaml:"merged_into"`
 		Sources     []Source `yaml:"sources"`
 		Threads     []string `yaml:"threads"`
@@ -140,7 +142,7 @@ func Load(dir string) (*Dossier, error) {
 	}
 	d := &Dossier{
 		Dir: dir, ID: f.ID, Title: f.Title, Alias: f.Alias, Description: f.Description, Resource: f.Resource,
-		State: f.State, WaitingOn: f.WaitingOn, WaitUntil: f.WaitUntil, MergedInto: f.MergedInto,
+		State: f.State, WaitingOn: f.WaitingOn, WaitUntil: f.WaitUntil, NoAction: f.NoAction, MergedInto: f.MergedInto,
 		Sources: f.Sources, Threads: f.Threads, Links: f.Links, Created: f.Created, Updated: f.Timestamp,
 		doc: mapping, body: body,
 	}
@@ -199,6 +201,7 @@ func (d *Dossier) Save() error {
 	set("state", d.State)
 	set("waiting_on", d.WaitingOn)
 	set("wait_until", d.WaitUntil)
+	set("no_action", d.NoAction)
 	set("merged_into", d.MergedInto)
 	set("sources", d.Sources)
 	set("threads", d.Threads)
@@ -225,6 +228,8 @@ func (d *Dossier) Save() error {
 
 func isEmpty(v any) bool {
 	switch x := v.(type) {
+	case bool:
+		return !x
 	case string:
 		return x == ""
 	case []Source:

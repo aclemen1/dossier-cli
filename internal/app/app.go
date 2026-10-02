@@ -328,6 +328,9 @@ func firstLine(s string) string {
 
 // event drops new content into a dossier and prompts its session.
 func (a *App) event(d *dossier.Dossier, note string, summary map[string]any, files []connector.File, noStart bool) (OpenResult, error) {
+	if err := a.requireAction(d, "something new arrived"); err != nil {
+		return OpenResult{}, err
+	}
 	paths, err := a.writeContext(d, files)
 	if err != nil {
 		return OpenResult{}, err
@@ -695,6 +698,9 @@ func contextFiles(d *dossier.Dossier) []string {
 }
 
 func (a *App) Prompt(d *dossier.Dossier, text string) error {
+	if err := a.requireAction(d, "prompted"); err != nil {
+		return err
+	}
 	if err := d.Save(); err != nil {
 		return err
 	}

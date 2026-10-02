@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/aclemen1/dossier-cli/internal/app"
 	"github.com/aclemen1/dossier-cli/internal/dossier"
@@ -138,5 +139,14 @@ func TestPriorityRaisesAMeetingWhosePointIsDue(t *testing.T) {
 	}
 	if got, want := order(view{}), "Ouvert,Séance,Point échu,Plus tard"; got != want {
 		t.Fatalf("by number\n got %s\nwant %s", got, want)
+	}
+}
+
+func TestANoActionDossierComesAfterOpenOnes(t *testing.T) {
+	now := time.Now()
+	open := &dossier.Dossier{ID: "D-0001", State: dossier.Open}
+	quiet := &dossier.Dossier{ID: "D-0002", State: dossier.Open, NoAction: true}
+	if !urgencyOf(open, "none", now).before(urgencyOf(quiet, "none", now)) {
+		t.Fatal("a no-action dossier should rank after an open one")
 	}
 }

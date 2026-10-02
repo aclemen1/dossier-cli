@@ -142,6 +142,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.status, m.statusErr = msg.id+": "+firstLine(msg.out, msg.err.Error()), true
 		case msg.verb == "restart":
 			m.status, m.statusErr = msg.id+": session restarted, no prompt sent", false
+		case msg.verb == "park" || msg.verb == "unpark":
 		default:
 			m.status, m.statusErr = msg.id+": pane focused", false
 		}
@@ -229,6 +230,16 @@ func (m *model) key(k string) tea.Cmd {
 		}
 		m.status, m.statusErr = r.d.Label()+": starting its session with the open prompt…", false
 		return run(r.store.root, r.d.ID, "attach")
+	case "n":
+		if r == nil {
+			break
+		}
+		verb, say := "park", ": marked as needing no action"
+		if r.d.NoAction {
+			verb, say = "unpark", ": needs action again"
+		}
+		m.status, m.statusErr = r.d.Label()+say, false
+		return run(r.store.root, r.d.ID, verb)
 	case "R":
 		if r == nil {
 			break
@@ -406,7 +417,7 @@ func (m *model) topBar() string {
 }
 
 func (m *model) bottomBar() string {
-	keys := [][2]string{{"↑↓", "move"}, {"enter", "pane"}, {"s", "start"}, {"o", "start + prompt"}, {"R", "restart"},
+	keys := [][2]string{{"↑↓", "move"}, {"enter", "pane"}, {"s", "start"}, {"o", "start + prompt"}, {"R", "restart"}, {"n", "no action"},
 		{"J K", "scroll"}, {"p", "priority"}, {"w", "by person"}, {"a", "all"}, {"/", "filter"}, {"tab", "detail"}, {"q", "quit"}}
 	var parts []string
 	for _, k := range keys {
@@ -482,7 +493,10 @@ func (m *model) rowView(r row, sel bool, w int) string {
 			tree.WriteString("│  ")
 		}
 	}
-	state := stateStyle(d.State).Render(fmt.Sprintf("%-8s", d.State))
+	state := stateStyle(d.State).Render(fmt.Sprintf("%-9s", d.State))
+	if parked(d) {
+		state = sFaint.Render(fmt.Sprintf("%-9s", "no action"))
+	}
 	label := sBold.Render(fmt.Sprintf("%-7s", d.Label()))
 	prefix := "   " + activityMark(r.activity) + "  " + label + "  " + state + " " + m.waitCell(d) + sFaint.Render(tree.String())
 	var tail []string
@@ -624,7 +638,11 @@ func (m *model) detailView(w, h int) string {
 	}
 
 	section("Status")
-	field("state", stateStyle(d.State).Render(d.State))
+	if parked(d) {
+		field("state", stateStyle(d.State).Render(d.State)+sMuted.Render(" · no action required for now"))
+	} else {
+		field("state", stateStyle(d.State).Render(d.State))
+	}
 	field("agent", activityMark(r.activity)+" "+sText.Render(activityWord(r.activity)))
 	if len(r.blocked) > 0 {
 		field("blocked by", lipgloss.NewStyle().Foreground(cStopped).Render(strings.Join(r.blocked, ", ")))

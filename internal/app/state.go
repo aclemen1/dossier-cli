@@ -48,6 +48,7 @@ func (a *App) SetState(d *dossier.Dossier, move, note, waitingOn string) (int, e
 	}
 	from := d.State
 	d.State = m.to
+	d.NoAction = false
 	if m.to == dossier.Waiting {
 		d.WaitingOn = waitingOn
 	} else {
@@ -86,6 +87,42 @@ func (a *App) SetState(d *dossier.Dossier, move, note, waitingOn string) (int, e
 		}
 	}
 	return pending, d.Save()
+}
+
+// Park marks an open dossier as needing no action from the user for now.
+// Anything new on it clears the mark: see requireAction.
+func (a *App) Park(d *dossier.Dossier, note string) error {
+	if d.State != dossier.Open {
+		return spec.UserError("%s is %s; only an open dossier can be marked as needing no action", d.ID, d.State)
+	}
+	if d.NoAction {
+		return nil
+	}
+	d.NoAction = true
+	line := "no action required"
+	if note != "" {
+		line += " · " + note
+	}
+	_ = d.Log("%s", line)
+	return d.Save()
+}
+
+// requireAction clears the no-action mark, saying why.
+func (a *App) requireAction(d *dossier.Dossier, why string) error {
+	if !d.NoAction {
+		return nil
+	}
+	d.NoAction = false
+	_ = d.Log("action required · %s", why)
+	return d.Save()
+}
+
+// Unpark clears the no-action mark by hand.
+func (a *App) Unpark(d *dossier.Dossier, note string) error {
+	if note == "" {
+		note = "marked by hand"
+	}
+	return a.requireAction(d, note)
 }
 
 // CorrectWait changes whom a waiting dossier waits on and until when. The
