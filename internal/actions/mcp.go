@@ -31,38 +31,42 @@ var tools = []tool{
 		description: "Search the full conversation of this dossier, or of a dossier merged into it.",
 		check:       grepScope},
 	{name: "tree", action: "tree", self: []string{"id"}, description: "Walk this dossier's links: points it includes, what blocks them."},
-	{name: "wait", action: "wait", self: []string{"id"}, description: "Mark this dossier as waiting on someone outside."},
-	{name: "resume", action: "resume", self: []string{"id"}, hide: []string{"prompt"}, description: "Bring this waiting dossier back to open."},
+	{name: "wait", action: "wait", description: "Mark this dossier, or one it includes, as waiting on someone outside; again on a waiting dossier, it corrects whom it waits on and until when. id defaults to this dossier.",
+		check: selfOrIncluded("id")},
+	{name: "resume", action: "resume", hide: []string{"prompt"}, description: "Bring this waiting dossier, or a waiting one it includes, back to open. id defaults to this dossier.",
+		check: selfOrIncluded("id")},
 	{name: "close", action: "close", self: []string{"id"}, description: "Close this dossier once the user says it is settled."},
 	{name: "open", action: "open", self: []string{"agenda"}, hide: []string{"source", "thread", "url"},
 		description: "Open a new dossier that this one includes, e.g. an agenda item of this meeting or a side affair that grows out of this one."},
 	{name: "link", action: "link", description: "Link this dossier, or one it includes, to another: includes (agenda item) or depends_on (waits for). from defaults to this dossier.",
-		check: fromSelfOrIncluded},
+		check: selfOrIncluded("from")},
 	{name: "unlink", action: "unlink", description: "Remove links from this dossier, or one it includes, to another. from defaults to this dossier.",
-		check: fromSelfOrIncluded},
+		check: selfOrIncluded("from")},
 	{name: "track", action: "track", self: []string{"id"},
 		description: "Attach a thread to this dossier as a source, e.g. the thread of a draft you just wrote: its replies come back here, and its star follows the dossier's state."},
 	{name: "merge", action: "merge", self: []string{"from"}, description: "Merge this dossier into another one, after the user agreed."},
 	{name: "notify", action: "notify", self: []string{"from"}, description: "Tell a dossier that this one includes what was decided."},
 }
 
-// fromSelfOrIncluded lets a session link from its own dossier or from a
-// dossier its dossier includes.
-func fromSelfOrIncluded(a *app.App, self string, args map[string]any) error {
-	from, _ := args["from"].(string)
-	if from == "" {
-		args["from"] = self
-		return nil
+// selfOrIncluded lets a session act, through param, on its own dossier (the
+// default) or on a dossier its dossier includes.
+func selfOrIncluded(param string) func(*app.App, string, map[string]any) error {
+	return func(a *app.App, self string, args map[string]any) error {
+		target, _ := args[param].(string)
+		if target == "" {
+			args[param] = self
+			return nil
+		}
+		d, err := a.Load(target)
+		if err != nil {
+			return err
+		}
+		if d.ID == self || includes(a, self, d.ID) {
+			args[param] = d.ID
+			return nil
+		}
+		return spec.UserError("%s must be this dossier (%s) or a dossier it includes; %s is neither", param, self, d.ID)
 	}
-	d, err := a.Load(from)
-	if err != nil {
-		return err
-	}
-	if d.ID == self || includes(a, self, d.ID) {
-		args["from"] = d.ID
-		return nil
-	}
-	return spec.UserError("links start from this dossier (%s) or from a dossier it includes; %s is neither", self, d.ID)
 }
 
 func grepScope(a *app.App, self string, args map[string]any) error {

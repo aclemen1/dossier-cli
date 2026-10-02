@@ -551,9 +551,14 @@ func (a *App) sendPrompt(d *dossier.Dossier, text string) error {
 	return nil
 }
 
-// Attach makes sure the session runs in a tab and focuses it.
-func (a *App) Attach(d *dossier.Dossier) error {
-	if d.Run.Session == "" {
+// Attach makes sure the session runs in a tab and focuses it. A dossier
+// without a session gets one, with its open prompt unless noPrompt.
+func (a *App) Attach(d *dossier.Dossier, noPrompt bool) error {
+	if d.Run.Session == "" && noPrompt {
+		if err := a.startSilent(d); err != nil {
+			return err
+		}
+	} else if d.Run.Session == "" {
 		text, err := a.renderPrompt(d, "open", bodyInstruction(d), nil, contextFiles(d))
 		if err != nil {
 			return err
@@ -569,6 +574,26 @@ func (a *App) Attach(d *dossier.Dossier) error {
 	if d.Run.TabID != "" {
 		_ = exec.Command("herdr", "tab", "focus", d.Run.TabID).Run()
 	}
+	return nil
+}
+
+// startSilent starts a new session in a tab and sends it nothing.
+func (a *App) startSilent(d *dossier.Dossier) error {
+	c, err := a.client(d)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	sid, pl, err := c.NewSession()
+	if err != nil {
+		return err
+	}
+	d.Run.Session, d.Run.PaneID, d.Run.TabID = sid, pl.PaneID, pl.TabID
+	_ = d.Log("session %s started in tab %s, without a prompt", sid, pl.TabID)
+	if err := d.Save(); err != nil {
+		return err
+	}
+	renameTab(d.Run.TabID, TabLabel(d))
 	return nil
 }
 

@@ -253,3 +253,29 @@ func TestMCPWaitUsesTheDefaultDelayAndNotifyWakes(t *testing.T) {
 		t.Fatalf("notify left the point %s", pt.State)
 	}
 }
+
+func TestMCPWaitsAndResumesADossierItIncludes(t *testing.T) {
+	a := storeWith(t, "Séance PSEC", "Audit des accès S3", "Autre")
+	a.Link("1", "2", "includes")
+	c := startMCP(t)
+	c.rpc(t, "initialize", map[string]any{})
+	if env, isErr := c.call(t, "wait", map[string]any{"id": "D-0002", "on": "Alain", "until": "2027-01-04"}); isErr {
+		t.Fatalf("wait on an included dossier: %v", env)
+	}
+	if env, isErr := c.call(t, "wait", map[string]any{"id": "D-0002", "on": "Patricia", "until": "2026-10-09"}); isErr {
+		t.Fatalf("correct the wait: %v", env)
+	}
+	d, _ := a.Load("2")
+	if d.State != "waiting" || d.WaitingOn != "Patricia" || !strings.HasPrefix(d.WaitUntil, "2026-10-09") {
+		t.Fatalf("corrected wait: %s on %q until %q", d.State, d.WaitingOn, d.WaitUntil)
+	}
+	if self, _ := a.Load("1"); self.State != "open" {
+		t.Fatalf("the meeting itself moved to %s", self.State)
+	}
+	if env, isErr := c.call(t, "resume", map[string]any{"id": "D-0002"}); isErr {
+		t.Fatalf("resume an included dossier: %v", env)
+	}
+	if env, isErr := c.call(t, "wait", map[string]any{"id": "D-0003", "on": "X"}); !isErr || !strings.Contains(env["error"].(map[string]any)["message"].(string), "neither") {
+		t.Fatalf("wait on a foreign dossier: %v", env)
+	}
+}

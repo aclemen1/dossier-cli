@@ -64,12 +64,20 @@ func moveAction(name, summary string, effects, examples []string, extra ...spec.
 					return nil, err
 				}
 				if name == "wait" {
-					until := ctx.Str("until")
-					if until == "" {
+					until, correcting := ctx.Str("until"), d.State == dossier.Waiting
+					if until == "" && !correcting {
 						until = a.DefaultWait()
 					}
-					if d.WaitUntil, err = app.ParseUntil(until, time.Now()); err != nil {
-						return nil, err
+					if until != "" {
+						if d.WaitUntil, err = app.ParseUntil(until, time.Now()); err != nil {
+							return nil, err
+						}
+					}
+					if correcting {
+						if err := a.CorrectWait(d, ctx.Str("on"), d.WaitUntil, ctx.Str("note")); err != nil {
+							return nil, err
+						}
+						return stateResult{d.ID, d.State, 0}, nil
 					}
 				}
 				pending, err := a.SetState(d, name, ctx.Str("note"), ctx.Str("on"))
@@ -367,16 +375,18 @@ func init() {
 
 	spec.Register(&spec.Action{
 		Category: "dossier", Name: "attach", Summary: "Focus the dossier's tab; relaunch its session first when the tab is gone.",
-		Params:   []spec.Param{idParam("Dossier id.")},
-		Effects:  []string{"May open a new herdr tab running the resumed session."},
-		Examples: []string{"dossier attach D-0042"},
+		Params: []spec.Param{idParam("Dossier id."),
+			{Name: "no-prompt", Kind: spec.Bool, Help: "When the dossier has no session yet, start one without sending its open prompt."}},
+		Effects: []string{"May open a new herdr tab running the resumed session.",
+			"Starts a session for a dossier that has none, with its open prompt unless --no-prompt."},
+		Examples: []string{"dossier attach D-0042", "dossier attach D-0042 --no-prompt"},
 		Run: func(ctx *spec.Context) (any, error) {
 			return withApp(ctx, true, func(a *app.App) (any, error) {
 				d, err := a.Load(ctx.Str("id"))
 				if err != nil {
 					return nil, err
 				}
-				if err := a.Attach(d); err != nil {
+				if err := a.Attach(d, ctx.Bool("no-prompt")); err != nil {
 					return nil, err
 				}
 				return map[string]any{"id": d.ID, "session": d.Run.Session, "tab_id": d.Run.TabID}, nil
@@ -417,7 +427,7 @@ func init() {
 
 	// ---------------------------------------------------------------- state
 	spec.Register(moveAction("wait", "Mark the dossier as waiting on a third party.",
-		[]string{"Sets state to waiting, waiting_on and wait_until.", "Calls transition open → waiting on every source (Gmail: purple star).", "Closes the tab when lifecycle.close_tab_on includes waiting.",
+		[]string{"Sets state to waiting, waiting_on and wait_until.", "On a waiting dossier, corrects waiting_on, and wait_until when --until is given; no source transition.", "Calls transition open → waiting on every source (Gmail: purple star).", "Closes the tab when lifecycle.close_tab_on includes waiting.",
 			"When wait_until passes, ingest wakes the dossier and asks its session whether to chase."},
 		[]string{`dossier wait D-0042 --on "Baer SA"`, `dossier wait --on "la gérance" --until 2026-10-15`, `dossier wait D-0042 --on "Baer SA" --until none`},
 		spec.Param{Name: "on", Kind: spec.String, Required: true, Help: "Who the dossier waits for."},

@@ -88,6 +88,21 @@ func (a *App) SetState(d *dossier.Dossier, move, note, waitingOn string) (int, e
 	return pending, d.Save()
 }
 
+// CorrectWait changes whom a waiting dossier waits on and until when. The
+// state does not move, so the sources see no transition.
+func (a *App) CorrectWait(d *dossier.Dossier, waitingOn, until, note string) error {
+	d.WaitingOn, d.WaitUntil = waitingOn, until
+	line := "wait corrected · on " + waitingOn
+	if until != "" {
+		line += " · until " + until
+	}
+	if note != "" {
+		line += " · " + note
+	}
+	_ = d.Log("%s", line)
+	return d.Save()
+}
+
 // Wake brings a dossier back to open: reopens it when done, resumes it when
 // waiting. Anything new for a dossier goes through it.
 func (a *App) Wake(d *dossier.Dossier, reason string) (int, error) {
