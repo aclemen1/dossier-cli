@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"github.com/aclemen1/dossier-cli/internal/dossier"
 	"github.com/aclemen1/dossier-cli/internal/spec"
 	"github.com/aclemen1/dossier-cli/internal/store"
+	"github.com/aclemen1/dossier-cli/internal/tui"
 )
 
 var Version = "0.1.0-dev"
@@ -526,6 +528,27 @@ func init() {
 			})
 		},
 		Text: func(w io.Writer, r any) { printTree(w, r.(app.TreeNode), "") },
+	})
+
+	spec.Register(&spec.Action{
+		Category: "store", Name: "tui", Summary: "Browse every store under a root: dossiers, links, agents; jump to a dossier's pane.",
+		Discussion: "Interactive, for a person in a terminal. Enter focuses the dossier's herdr tab and resumes its session " +
+			"when the tab is gone; S also starts a session for a dossier that has none.",
+		Params: []spec.Param{
+			{Name: "root", Kind: spec.String, Positional: true, Help: "Directory holding the stores, or one store. Defaults to the parent of the resolved store."},
+		},
+		Examples: []string{"dossier tui", "dossier tui ~/dossiers"},
+		Run: func(ctx *spec.Context) (any, error) {
+			root := store.ExpandHome(ctx.Str("root"))
+			if root == "" {
+				s, err := store.Resolve(ctx.Store)
+				if err != nil {
+					return nil, err
+				}
+				root = filepath.Dir(s.Root)
+			}
+			return nil, tui.Run(root)
+		},
 	})
 
 	// ---------------------------------------------------------------- ingest

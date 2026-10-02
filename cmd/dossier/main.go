@@ -71,6 +71,9 @@ func run(argv []string) int {
 		return spec.Emit(act, format, nil, err)
 	}
 	result, err := act.Run(&spec.Context{Args: args, Store: storeFlag, Format: format, Stdin: os.Stdin})
+	if act.Name == "tui" && err == nil {
+		return 0
+	}
 	if act.Name == "mcp" {
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "dossier mcp:", err)
